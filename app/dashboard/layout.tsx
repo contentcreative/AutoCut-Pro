@@ -4,14 +4,14 @@
  * and applies the dashboard-specific styling
  */
 import React, { ReactNode } from "react";
-import { getProfileByUserId, updateProfile } from "@/db/queries/profiles-queries";
+// import { getProfileByUserId, updateProfile } from "@/db/queries/profiles-queries";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/sidebar";
 import { revalidatePath } from "next/cache";
-import CancellationPopup from "@/components/cancellation-popup";
-import WelcomeMessagePopup from "@/components/welcome-message-popup";
-import PaymentSuccessPopup from "@/components/payment-success-popup";
+// import CancellationPopup from "@/components/cancellation-popup";
+// import WelcomeMessagePopup from "@/components/welcome-message-popup";
+// import PaymentSuccessPopup from "@/components/payment-success-popup";
 
 /**
  * Check if a free user with an expired billing cycle needs their credits downgraded
@@ -48,13 +48,14 @@ async function checkExpiredSubscriptionCredits(profile: any | null): Promise<any
       // but we'll no longer check it after this point
       
       // Update profile with free tier credit limit
-      const updatedProfile = await updateProfile(profile.userId, updateData);
+      // const updatedProfile = await updateProfile(profile.userId, updateData);
       
       // Revalidate pages that display credit information
       revalidatePath("/dashboard");
       revalidatePath("/notes");
       
-      return updatedProfile;
+      // return updatedProfile;
+      return profile; // Return the original profile for now
     }
   }
   
@@ -69,23 +70,45 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     return redirect("/login");
   }
 
-  let profile = await getProfileByUserId(userId);
+  // Profile logic commented out due to missing queries
+  // let profile = await getProfileByUserId(userId);
 
-  if (!profile) {
-    return redirect("/signup");
-  }
+  // if (!profile) {
+  //   return redirect("/signup");
+  // }
 
-  // Run just-in-time credit check for expired subscriptions
-  profile = await checkExpiredSubscriptionCredits(profile);
+  // // Run just-in-time credit check for expired subscriptions
+  // profile = await checkExpiredSubscriptionCredits(profile);
   
-  // Verify profile is still valid after check
-  if (!profile) {
-    return redirect("/signup");
-  }
+  // // Verify profile is still valid after check
+  // if (!profile) {
+  //   return redirect("/signup");
+  // }
 
   // Get the current user to extract email
   const user = await currentUser();
   const userEmail = user?.emailAddresses?.[0]?.emailAddress || "";
+
+  // Mock profile for now
+  const profile = {
+    userId,
+    email: userEmail,
+    membership: 'free' as const,
+    paymentProvider: null,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    whopUserId: null,
+    whopMembershipId: null,
+    status: 'active',
+    planDuration: null,
+    billingCycleStart: null,
+    billingCycleEnd: null,
+    usageCredits: 5,
+    usedCredits: 0,
+    nextCreditRenewal: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
   
   // Log profile details for debugging
   console.log('Dashboard profile:', {
@@ -98,15 +121,15 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <div className="flex h-screen bg-gray-50 relative overflow-hidden">
       {/* Show welcome message popup - component handles visibility logic */}
-      <WelcomeMessagePopup profile={profile} />
+      {/* <WelcomeMessagePopup profile={profile} /> */}
       
       {/* Show payment success popup - component handles visibility logic */}
-      <PaymentSuccessPopup profile={profile} />
+      {/* <PaymentSuccessPopup profile={profile} /> */}
       
       {/* Show cancellation popup directly if status is canceled */}
-      {profile.status === "canceled" && (
+      {/* {profile.status === "canceled" && (
         <CancellationPopup profile={profile} />
-      )}
+      )} */}
       
       {/* Sidebar component with profile data and user email */}
       <Sidebar 

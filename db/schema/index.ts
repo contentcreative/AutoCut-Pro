@@ -1,2 +1,2 @@
+export * from "./exports-schema";
 export * from "./profiles-schema";
-export * from "./pending-profiles-schema";

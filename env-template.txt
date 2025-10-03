@@ -1,0 +1,154 @@
+# ===========================================
+# AUTOCUT PRO - VIDEO EXPORT PLATFORM
+# ===========================================
+# Environment Variables Template
+# Copy this content to .env.local and fill in your actual values
+# Never commit .env.local to version control!
+
+# ===========================================
+# DATABASE (Supabase PostgreSQL)
+# ===========================================
+# Get this from your Supabase project settings > Database > Connection string
+DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.[YOUR-PROJECT-ID].supabase.co:6543/postgres"
+
+# ===========================================
+# SUPABASE CONFIGURATION
+# ===========================================
+# Get these from your Supabase project settings > API
+NEXT_PUBLIC_SUPABASE_URL="https://[YOUR-PROJECT-ID].supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.[YOUR-SERVICE-ROLE-KEY]"
+
+# ===========================================
+# AUTHENTICATION (Clerk)
+# ===========================================
+# Get these from your Clerk dashboard > API Keys
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_[YOUR-PUBLISHABLE-KEY]"
+CLERK_SECRET_KEY="sk_test_[YOUR-SECRET-KEY]"
+NEXT_PUBLIC_CLERK_SIGN_IN_URL="/login"
+NEXT_PUBLIC_CLERK_SIGN_UP_URL="/signup"
+
+# ===========================================
+# PAYMENTS (Whop - Primary Payment Provider)
+# ===========================================
+# Get these from your Whop dashboard > Settings > API
+WHOP_API_KEY="whop_[YOUR-API-KEY]"
+WHOP_WEBHOOK_KEY="whop_[YOUR-WEBHOOK-KEY]"
+
+# Whop Plan IDs (get these from your Whop dashboard > Plans)
+WHOP_PLAN_ID_MONTHLY="plan_[YOUR-MONTHLY-PLAN-ID]"
+WHOP_PLAN_ID_YEARLY="plan_[YOUR-YEARLY-PLAN-ID]"
+
+# Whop Portal and Redirect URLs
+NEXT_PUBLIC_WHOP_PORTAL_LINK="https://whop.com/portal"
+NEXT_PUBLIC_WHOP_REDIRECT_URL="https://your-app.com/dashboard"
+
+# Active Payment Provider (set to "whop" for Whop, "stripe" for Stripe)
+ACTIVE_PAYMENT_PROVIDER="whop"
+
+# ===========================================
+# PAYMENTS (Stripe - Alternative/Backup)
+# ===========================================
+# Get these from your Stripe dashboard > Developers > API keys
+STRIPE_SECRET_KEY="sk_test_[YOUR-STRIPE-SECRET-KEY]"
+STRIPE_WEBHOOK_SECRET="whsec_[YOUR-WEBHOOK-SECRET]"
+
+# Stripe Portal and Payment Links
+NEXT_PUBLIC_STRIPE_PORTAL_LINK="https://billing.stripe.com/p/session/[YOUR-PORTAL-SESSION-ID]"
+NEXT_PUBLIC_STRIPE_PAYMENT_LINK_YEARLY="https://buy.stripe.com/[YOUR-YEARLY-LINK-ID]"
+NEXT_PUBLIC_STRIPE_PAYMENT_LINK_MONTHLY="https://buy.stripe.com/[YOUR-MONTHLY-LINK-ID]"
+
+# ===========================================
+# VIDEO EXPORT WORKER CONFIGURATION
+# ===========================================
+# Maximum concurrent export jobs (adjust based on your server capacity)
+# Recommended: 1-2 for small servers, 4-8 for dedicated machines
+EXPORT_MAX_CONCURRENT="2"
+
+# Worker port (for Express-based export processor)
+# This runs outside of Vercel serverless to handle heavy FFmpeg processing
+WORKER_PORT="3030"
+
+# Optional: Custom FFmpeg path (leave empty to use ffmpeg-static)
+# FFMPEG_PATH="/usr/local/bin/ffmpeg"
+
+# ===========================================
+# SUPABASE STORAGE BUCKETS
+# ===========================================
+# Source videos bucket (where uploaded videos are stored)
+SOURCE_VIDEOS_BUCKET="source-videos"
+
+# Exports bucket (where processed ZIP files are stored - MUST BE PRIVATE)
+EXPORTS_BUCKET="exports"
+
+# Brand assets bucket (logos, overlays, etc.)
+BRAND_ASSETS_BUCKET="brand-assets"
+
+# ===========================================
+# DEVELOPMENT & DEBUGGING
+# ===========================================
+# Set to "development" for local dev, "production" for production
+NODE_ENV="development"
+
+# Optional: Enable debug logging
+# DEBUG="export-worker:*"
+
+# ===========================================
+# DEPLOYMENT (Vercel)
+# ===========================================
+# These will be set automatically by Vercel, but you can override if needed
+# VERCEL_URL="your-app.vercel.app"
+# VERCEL_ENV="development"
+
+# ===========================================
+# SECURITY NOTES
+# ===========================================
+# 1. Never commit this file to version control
+# 2. Use different keys for development vs production
+# 3. Rotate API keys regularly
+# 4. Use environment-specific values in production
+# 5. Monitor API key usage in your service dashboards
+
+# ===========================================
+# SETUP CHECKLIST
+# ===========================================
+# □ Supabase project created and DATABASE_URL configured
+# □ Supabase Storage buckets created:
+#   - source-videos (public, for uploaded videos)
+#   - exports (PRIVATE, for processed ZIP files)
+#   - brand-assets (public, for logos and overlays)
+# □ Clerk application created and keys configured
+# □ Whop application created and API keys configured
+# □ Whop plans created and plan IDs configured
+# □ Stripe account created and keys configured (if using Stripe)
+# □ Express worker dependencies installed (archiver, fluent-ffmpeg, ffmpeg-static)
+# □ All environment variables filled in with actual values
+# □ .env.local added to .gitignore
+# □ Test database connection and storage access
+# □ Test worker can start and connect to database
+
+# ===========================================
+# QUICK REFERENCE - WHERE TO GET KEYS
+# ===========================================
+# Supabase: Project Settings → API → Project URL & Service Role Key
+# Clerk: Dashboard → API Keys → Publishable & Secret Keys
+# Whop: Dashboard → Settings → API → API Key & Webhook Key
+# Stripe: Dashboard → Developers → API Keys → Secret Key
+
+# ===========================================
+# ARCHITECTURE OVERVIEW
+# ===========================================
+# This is a video export platform that:
+# 1. Takes source videos from Supabase Storage
+# 2. Processes them with FFmpeg for multiple formats/aspect ratios
+# 3. Applies brand overlays and generates thumbnails
+# 4. Packages everything into downloadable ZIP files
+# 5. Manages the entire workflow with job queuing and progress tracking
+#
+# Key Components:
+# - Next.js app (server actions, UI components)
+# - Express worker (FFmpeg processing, ZIP creation)
+# - Supabase (database, storage, auth)
+# - Clerk (authentication)
+# - Whop (subscription management)
+#
+# The worker runs outside Vercel serverless to handle heavy processing.

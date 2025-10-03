@@ -1,0 +1,491 @@
+---
+alwaysApply: true
+---
+      hashtags: z.array(z.string()).optional(),
+    }).optional(),
+    outputNaming: z.string().optional(),
+  }).optional(),
+});
+
+export type CreateExportJobInput = z.infer<typeof createExportJobSchema>;
+
+export async function createExportJob(input: CreateExportJobInput) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  const sub = await getUserActiveSubscription(userId);
+  if (!sub?.active) {
+    throw new Error('An active subscription is required to export.');
+  }
+
+  const parsed = createExportJobSchema.parse(input);
+
+  const [job] = await db.insert(exportJobs).values({
+    userId,
+    projectId: parsed.projectId as any,
+    contentId: parsed.contentId as any,
+    brandKitId: parsed.brandKitId as any,
+    formats: parsed.formats,
+    options: parsed.options ?? {},
+    storageBucket: 'exports',
+    sourceVideoPath: parsed.sourceVideoPath,
+    status: 'queued',
+    progress: 0,
+  }).returning();
+
+  // Hint worker (optional: NOTIFY payload or lightweight webhook). Worker will poll by default.
+  // await notifyWorker(job.id);
+
+  revalidatePath('/dashboard/exports'); // adjust to actual path
+  return job;
+}
+
+export async function listExportJobs() {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  const rows = await db.select().from(exportJobs)
+    .where(eq(exportJobs.userId, userId))
+    .orderBy(desc(exportJobs.createdAt));
+
+  return rows;
+}
+
+export async function getExportJob(jobId: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  const [job] = await db.select().from(exportJobs)
+    .where(and(eq(exportJobs.id, jobId as any), eq(exportJobs.userId, userId)));
+
+  if (!job) throw new Error('Not found');
+  return job;
+}
+
+export async function cancelExportJob(jobId: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  // Only allow cancel if not terminal
+  const [job] = await db.update(exportJobs)
+    .set({ status: 'canceled', updatedAt: new Date() })
+    .where(and(
+      eq(exportJobs.id, jobId as any),
+      eq(exportJobs.userId, userId),
+    ))
+    .returning();
+
+  if (!job) throw new Error('Not found or cannot cancel');
+  revalidatePath('/dashboard/exports');
+  return job;
+}
+
+export async function getExportDownloadUrl(jobId: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  const [job] = await db.select().from(exportJobs)
+    .where(and(eq(exportJobs.id, jobId as any), eq(exportJobs.userId, userId)));
+
+  if (!job) throw new Error('Not found');
+  if (job.status !== 'ready' || !job.zipStoragePath) {
+    throw new Error('Export not ready');
+  }
+
+  const supa = createSupabaseAdminClient();
+  const { data, error } = await supa.storage
+    .from(job.storageBucket)
+    .createSignedUrl(job.zipStoragePath, 60 * 5); // 5 min
+
+  if (error) throw error;
+  return { url: data.signedUrl };
+}
+```
+
+Worker (Express-based processor) that handles FFmpeg, brand overlays, thumbnails, and packaging:
+
+```typescript
+// /worker/export-processor.ts
+import 'dotenv/config';
+import express from 'express';
+import path from 'path';
+import fs from 'fs/promises';
+import os from 'os';
+import crypto from 'crypto';
+import archiver from 'archiver';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegStatic from 'ffmpeg-static';
+import { db } from '@/db'; // or a separate db instance in worker context
+import { exportJobs, exportAssets } from '@/db/schema/exports';
+import { eq, sql as dsql } from 'drizzle-orm';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getBrandKitForJob } from './lib/brand-kits'; // implement: fetch brand kit details by job.brandKitId
+
+ffmpeg.setFfmpegPath(ffmpegStatic as string);
+
+const app = express();
+app.use(express.json());
+
+const MAX_CONCURRENT = Number(process.env.EXPORT_MAX_CONCURRENT || 1);
+let running = 0;
+
+async function claimNextJob() {
+  // Use a SQL lock to avoid double-processing across workers
+  const client = await (db as any).session.client; // or use a raw client with db.execute
+  const { rows } = await client.query(`
+    UPDATE export_jobs
+    SET status = 'processing', started_at = now(), updated_at = now()
+    WHERE id = (
+      SELECT id FROM export_jobs
+      WHERE status = 'queued'
+      ORDER BY created_at ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    )
+    RETURNING *;
+  `);
+  return rows?.[0] || null;
+}
+
+async function processJob(job: any) {
+  running++;
+  try {
+    const supa = createSupabaseAdminClient();
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), `export-${job.id}-`));
+    const outDir = path.join(tmpRoot, 'out');
+    await fs.mkdir(outDir);
+
+    // Prepare brand kit assets (logo, colors, overlay)
+    const brandKit = job.brandKitId ? await getBrandKitForJob(job.brandKitId) : null;
+
+    // Download source video from Supabase Storage to tmp
+    const sourceTmp = path.join(tmpRoot, 'source.mp4');
+    {
+      const { data, error } = await supa.storage.from((job.storageBucket as string) || 'exports')
+        .download(job.sourceVideoPath);
+      if (error) throw error;
+      await fs.writeFile(sourceTmp, Buffer.from(await data.arrayBuffer()));
+    }
+
+    // Process formats
+    const assets: Array<{ type: 'video'|'thumbnail'|'metadata', variant: string, filePath: string }> = [];
+
+    let processed = 0;
+    const totalSteps = job.formats.length + (job.options?.generateThumbnails ? job.formats.length : 0) + 2; // +2 for metadata + zip
+
+    function updateProgress(stepInc = 1, phase?: string) {
+      processed += stepInc;
+      const pct = Math.min(95, Math.round((processed / totalSteps) * 100));
+      db.update(exportJobs).set({ progress: pct, updatedAt: new Date() }).where(eq(exportJobs.id, job.id)).execute();
+    }
+
+    // Generate metadata text files
+    const metadataDir = path.join(outDir, 'metadata');
+    await fs.mkdir(metadataDir);
+    const title = job.options?.metadataOverrides?.title || `Export ${job.id}`;
+    const description = job.options?.metadataOverrides?.description || '';
+    const hashtags = (job.options?.metadataOverrides?.hashtags || []).map((h: string) => h.startsWith('#') ? h : `#${h}`);
+    await fs.writeFile(path.join(metadataDir, 'title.txt'), title);
+    await fs.writeFile(path.join(metadataDir, 'description.txt'), description);
+    await fs.writeFile(path.join(metadataDir, 'hashtags.txt'), hashtags.join(' '));
+    assets.push({ type: 'metadata', variant: 'title.txt', filePath: path.join(metadataDir, 'title.txt') });
+    assets.push({ type: 'metadata', variant: 'description.txt', filePath: path.join(metadataDir, 'description.txt') });
+    assets.push({ type: 'metadata', variant: 'hashtags.txt', filePath: path.join(metadataDir, 'hashtags.txt') });
+    updateProgress();
+
+    // For each format: transcode with FFmpeg + overlay
+    for (const fmt of job.formats as Array<any>) {
+      const variant = `${fmt.ratio}-${fmt.resolution}`;
+      const videoOutDir = path.join(outDir, fmt.ratio.replace(':', 'x'));
+      await fs.mkdir(videoOutDir, { recursive: true });
+      const videoPath = path.join(videoOutDir, `video.mp4`);
+
+      const [w, h] = fmt.resolution.split('x').map((n: string) => parseInt(n, 10));
+      // Compute pad to match aspect ratio if needed
+      const [arW, arH] = fmt.ratio.split(':').map((n: string) => parseInt(n, 10));
+
+      // Build filter chain: scale, pad, brand overlay
+      const filters: string[] = [`scale=${w}:${h}:force_original_aspect_ratio=decrease`, `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`];
+      if (brandKit?.overlayFilter) {
+        filters.push(brandKit.overlayFilter); // e.g., "overlay=10:10"
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        let cmd = ffmpeg(sourceTmp)
+          .videoFilters(filters)
+          .outputOptions(['-movflags +faststart'])
+          .size(`${w}x${h}`)
+          .videoBitrate(fmt.bitrate || '6M')
+          .fps(fmt.fps || 30)
+          .output(videoPath);
+
+        cmd.on('error', reject).on('end', resolve).run();
+      });
+
+      assets.push({ type: 'video', variant, filePath: videoPath });
+      updateProgress();
+
+      if (job.options?.generateThumbnails) {
+        const thumbDir = path.join(outDir, 'thumbnails');
+        await fs.mkdir(thumbDir, { recursive: true });
+        const thumbPath = path.join(thumbDir, `thumb_${fmt.ratio.replace(':', 'x')}.png`);
+
+        const time = job.options?.thumbnailTimecode || '00:00:01';
+        await new Promise<void>((resolve, reject) => {
+          let cmd = ffmpeg(videoPath)
+            .screenshots({
+              count: 1,
+              timemarks: [time],
+              filename: path.basename(thumbPath),
+              folder: thumbDir,
+            });
+
+          cmd.on('error', reject).on('end', resolve);
+        });
+
+        // Apply brand overlay to thumbnail if needed (could use ffmpeg again)
+        if (brandKit?.thumbnailOverlayFilter) {
+          const brandedThumb = thumbPath.replace('.png', '_branded.png');
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(thumbPath)
+              .videoFilters([brandKit.thumbnailOverlayFilter])
+              .output(brandedThumb)
+              .on('error', reject)
+              .on('end', resolve)
+              .run();
+          });
+          await fs.rm(thumbPath);
+          assets.push({ type: 'thumbnail', variant: `${fmt.ratio}-thumb`, filePath: brandedThumb });
+        } else {
+          assets.push({ type: 'thumbnail', variant: `${fmt.ratio}-thumb`, filePath: thumbPath });
+        }
+
+        updateProgress();
+      }
+    }
+
+    // Create ZIP
+    await db.update(exportJobs).set({ status: 'packaging', updatedAt: new Date() }).where(eq(exportJobs.id, job.id)).execute();
+    const zipPath = path.join(tmpRoot, 'export.zip');
+    await new Promise<void>((resolve, reject) => {
+      const output = require('fs').createWriteStream(zipPath);
+      const archive = archiver('zip', { zlib: { level: 9 } });
+
+      output.on('close', resolve);
+      archive.on('error', reject);
+
+      archive.pipe(output);
+      archive.directory(outDir, false);
+      archive.finalize();
+    });
+
+    // Upload ZIP
+    await db.update(exportJobs).set({ status: 'uploaded', progress: 97, updatedAt: new Date() }).where(eq(exportJobs.id, job.id)).execute();
+    const bucket = job.storageBucket || 'exports';
+    const storageKey = `${job.userId}/${job.id}/export.zip`;
+
+    {
+      const zipBuf = await fs.readFile(zipPath);
+      const { error } = await supa.storage.from(bucket).upload(storageKey, zipBuf, {
+        contentType: 'application/zip',
+        upsert: true,
+      });
+      if (error) throw error;
+    }
+
+    // Save assets listing (optional: upload per-asset too if needed)
+    for (const a of assets) {
+      const stat = await (await require('fs')).promises.stat(a.filePath);
+      const checksum = crypto.createHash('md5').update(await fs.readFile(a.filePath)).digest('hex');
+      await db.insert(exportAssets).values({
+        jobId: job.id,
+        type: a.type,
+        variant: a.variant,
+        storagePath: `N/A (packed in zip)`,
+        sizeBytes: Number(stat.size),
+        checksum,
+      }).execute();
+    }
+
+    await db.update(exportJobs).set({
+      status: 'ready',
+      progress: 100,
+      zipStoragePath: storageKey,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(exportJobs.id, job.id)).execute();
+  } catch (err: any) {
+    await db.update(exportJobs).set({
+      status: 'failed',
+      error: err?.message || 'Unknown error',
+      updatedAt: new Date(),
+    }).where(eq(exportJobs.id, job.id)).execute();
+  } finally {
+    running--;
+  }
+}
+
+async function loop() {
+  if (running < MAX_CONCURRENT) {
+    const job = await claimNextJob();
+    if (job) processJob(job);
+  }
+  setTimeout(loop, 1500);
+}
+
+app.get('/health', (_req, res) => res.json({ ok: true, running }));
+
+app.listen(process.env.PORT || 3030, () => {
+  console.log('Export worker running');
+  loop();
+});
+```
+
+Route handlers for polling and download (optional, but helpful for client polling):
+
+```typescript
+// /app/api/exports/[jobId]/status/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs';
+import { db } from '@/db';
+import { exportJobs } from '@/db/schema/exports';
+import { and, eq } from 'drizzle-orm';
+
+export async function GET(req: NextRequest, ctx: { params: { jobId: string } }) {
+  const { userId } = auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const [job] = await db.select().from(exportJobs)
+    .where(and(eq(exportJobs.id, ctx.params.jobId as any), eq(exportJobs.userId, userId)));
+
+  if (!job) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  return NextResponse.json({ status: job.status, progress: job.progress, error: job.error ?? null });
+}
+```
+
+#### Components Structure
+
+```
+/components/exports/
+├── export-create-dialog.tsx         // Modal to configure formats and brand kit
+├── export-preferences-form.tsx      // Form fields for formats, resolution, bitrate, fps, thumbnails, metadata
+├── export-jobs-table.tsx            // Lists user’s export jobs with status, createdAt, actions
+├── export-job-row.tsx               // Row with status badges, progress, download button
+├── export-progress.tsx              // Progress bar and status text
+└── export-download-button.tsx       // Calls server action to get signed URL and triggers download
+
+/app/(dashboard)/projects/[projectId]/exports/page.tsx  // Export dashboard for a project
+```
+
+Key UI behaviors:
+- ExportCreateDialog uses ShadCN Dialog + Form + Select + Checkbox components
+- ExportJobsTable uses ShadCN Table with Badge for status and Button for actions
+- Framer Motion used for subtle row enter/update animations
+- Tailwind CSS for layout and spacing
+
+#### State Management
+- Form state: React state with Zod for validation; submit via server action createExportJob
+- Jobs list: SSR initial fetch + client-side polling every 2s to /api/exports/[jobId]/status for each active job
+- No global client state required; rely on server actions and lightweight polling
+- RevalidatePath after mutations to keep SSR lists in sync
+
+### Dependencies & Integrations
+- FFmpeg: fluent-ffmpeg + ffmpeg-static for cross-platform binary
+- Node Archiver: archiver for ZIP creation
+- Supabase Storage: store and serve export bundles (private bucket with signed URLs)
+- Brand Kit integration: fetch overlay assets/filters from brand kit feature (logo, colors, position)
+- Whop: verify active subscription before creating export job
+- Clerk: ownership and authorization for job access
+- Vercel: Next.js deployed; heavy work delegated to Express worker outside serverless runtime
+
+Required npm packages beyond standard stack:
+- archiver
+- fluent-ffmpeg
+- ffmpeg-static
+- zod (if not already present)
+- Optional: pino (structured logging) for worker
+
+Environment variables:
+- SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (worker)
+- NEXT_PUBLIC_SUPABASE_URL (web)
+- EXPORT_MAX_CONCURRENT (worker)
+- WORKER_PORT (optional)
+- WHOP_API_KEY
+- FFMPEG_PATH (optional; ffmpeg-static covers this)
+
+### Implementation Steps
+1. Create database schema
+   - Add /db/schema/exports.ts
+   - Run drizzle migration
+   - Ensure indices are created
+
+2. Generate queries
+   - Verify db exports are wired in /db/index.ts
+   - Implement helper queries (list by user, update status/progress)
+
+3. Implement server actions
+   - /actions/exports.ts with createExportJob, listExportJobs, getExportJob, cancelExportJob, getExportDownloadUrl
+   - Integrate Whop subscription check
+   - Add route handler for job status polling
+
+4. Build UI components
+   - ExportCreateDialog + ExportPreferencesForm (ShadCN)
+   - ExportJobsTable + ExportJobRow + ExportProgress + ExportDownloadButton
+   - Project exports page under /app/(dashboard)/projects/[projectId]/exports
+
+5. Connect frontend to backend
+   - Submit form to createExportJob
+   - Render jobs list with SSR and poll job statuses
+   - Download button calls getExportDownloadUrl then triggers browser download
+
+6. Add error handling
+   - UI toasts on failures
+   - Display job.error and enable retry (create new job)
+   - Worker robust try/catch with status failed and error message
+   - Validate inputs with Zod; block empty formats
+
+7. Test the feature
+   - Unit tests for server actions and worker builders
+   - Integration test simulating a full job
+   - UAT on staging with real FFmpeg and Storage
+
+### Edge Cases & Error Handling
+- No formats selected: Block submission with validation error
+- Invalid resolution string: Zod regex validation
+- Inactive subscription: Show paywall modal linking to billing
+- Large input video or long processing time: Worker updates progress; no timeout in serverless; worker is persistent
+- Storage upload failure: Worker sets failed with error; allow retry
+- Signed URL expired: Regenerate via getExportDownloadUrl
+- Canceled job: Worker checks status before each major step (optional enhancement) and aborts if canceled
+- Worker crash/restart: Jobs stuck in processing can be re-claimed if heartbeat system is added (future enhancement). MVP: manual admin fix or retry.
+- Missing brand kit: Proceed without overlays
+- Source video missing or unreadable: Fail job with error
+- Concurrent jobs: Worker limit via EXPORT_MAX_CONCURRENT; DB lock ensures single claim
+
+### Testing Approach
+- Unit tests
+  - Server actions: input validation, auth enforcement, subscription checks, row scoping
+  - Worker: format-to-filter chain builder, ZIP packaging routine, progress calculation
+  - Storage signed URL generation
+
+- Integration tests
+  - CreateExportJob -> Worker processes -> Status transitions -> getExportDownloadUrl
+  - Simulate Supabase Storage upload errors (mock) and verify failed state
+  - Verify RLS-equivalent scoping via server checks (user cannot access others’ jobs)
+
+- User acceptance tests
+  - Create a job with multiple formats, thumbnails enabled, custom metadata
+  - Observe progress until ready; download ZIP; verify file structure:
+    - /9x16/video.mp4
+    - /1x1/video.mp4
+    - /thumbnails/thumb_9x16.png
+    - /metadata/title.txt, description.txt, hashtags.txt
+  - Verify brand overlay presence on videos and thumbnails
+  - Verify signed URL access works and expires
+  - Attempt job as inactive subscriber; verify block
+
+Notes
+- Heavy processing is intentionally isolated to the Express worker to avoid Vercel serverless limits.
+- Storage bucket “exports” must be private. Only signed URLs are used for downloads.
+- Brand kit filters should be derived from brand kit assets at runtime (logo path, position). Implement getBrandKitForJob in worker to translate brand kit config to ffmpeg overlay filters.

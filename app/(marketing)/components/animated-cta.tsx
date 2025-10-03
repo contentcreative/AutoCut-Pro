@@ -1,64 +1,78 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import Link from "next/link";
 import { motion } from "framer-motion";
-import { SignedOut } from "@clerk/clerk-react";
+import { Button } from "@/components/ui/button";
+import { ArrowRight, Check, Zap } from "lucide-react";
+import Link from "next/link";
 
 export default function AnimatedCTA() {
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      whileInView={{ opacity: 1, scale: 1 }}
-      viewport={{ once: true }}
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
+      viewport={{ once: true }}
+      className="text-center space-y-8"
     >
-      <Card className="bg-primary text-primary-foreground">
-        <CardHeader>
-          <CardTitle className="text-2xl md:text-3xl">Ready to get started?</CardTitle>
-          <CardDescription className="text-primary-foreground/80">
-            Join thousands of developers building with our template
-          </CardDescription>
-        </CardHeader>
-        <CardFooter className="flex flex-col sm:flex-row gap-4">
-          <Button variant="secondary" size="lg" asChild>
-            <Link href="/dashboard">Get Started</Link>
-          </Button>
-          <Button
-            variant="outline"
-            className="bg-transparent border-primary-foreground text-primary-foreground hover:bg-primary-foreground/10"
-            size="lg"
-          >
-            View Documentation
-          </Button>
-          <SignedOut>
-            <Link href="/login?redirect_url=/dashboard">
-              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="font-medium rounded-xl bg-white/70 hover:bg-white/90 shadow-sm border border-white/60 text-gray-800 relative overflow-hidden group"
-                >
-                  <motion.span 
-                    className="absolute inset-0 w-full h-full bg-gradient-to-r from-primary/0 via-primary/20 to-primary/0"
-                    animate={{ 
-                      x: ['-100%', '200%'],
-                    }}
-                    transition={{ 
-                      duration: 2.5, 
-                      ease: "easeInOut",
-                      repeat: Infinity,
-                      repeatDelay: 1
-                    }}
-                  />
-                  <span className="relative z-10">Sign In</span>
-                </Button>
-              </motion.div>
-            </Link>
-          </SignedOut>
-        </CardFooter>
-      </Card>
+      {/* Main CTA */}
+      <div className="space-y-6">
+        <h2 className="text-3xl md:text-5xl font-bold">
+          Ready to transform your
+          <span className="bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            {" "}content workflow?
+          </span>
+        </h2>
+        <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          Join thousands of creators who are already using AutoCut Pro to export 
+          their videos faster and more efficiently than ever before.
+        </p>
+      </div>
+
+      {/* Benefits */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+        <div className="flex items-center space-x-3">
+          <Check className="h-5 w-5 text-primary flex-shrink-0" />
+          <span className="text-muted-foreground">Free to get started</span>
+        </div>
+        <div className="flex items-center space-x-3">
+          <Check className="h-5 w-5 text-primary flex-shrink-0" />
+          <span className="text-muted-foreground">No credit card required</span>
+        </div>
+        <div className="flex items-center space-x-3">
+          <Check className="h-5 w-5 text-primary flex-shrink-0" />
+          <span className="text-muted-foreground">Cancel anytime</span>
+        </div>
+      </div>
+
+      {/* CTA Buttons */}
+      <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+        <Button size="lg" className="text-lg px-8 py-6 h-auto" asChild>
+          <Link href="/dashboard">
+            <Zap className="mr-2 h-5 w-5" />
+            Start Exporting Now
+            <ArrowRight className="ml-2 h-5 w-5" />
+          </Link>
+        </Button>
+        <Button variant="outline" size="lg" className="text-lg px-8 py-6 h-auto" asChild>
+          <Link href="/pricing">
+            View Pricing Plans
+          </Link>
+        </Button>
+      </div>
+
+      {/* Trust Indicators */}
+      <div className="pt-8 border-t border-border/50">
+        <p className="text-sm text-muted-foreground mb-4">
+          Trusted by creators at
+        </p>
+        <div className="flex flex-wrap justify-center items-center gap-8 opacity-60">
+          <div className="text-lg font-semibold">TikTok</div>
+          <div className="text-lg font-semibold">YouTube</div>
+          <div className="text-lg font-semibold">Instagram</div>
+          <div className="text-lg font-semibold">LinkedIn</div>
+          <div className="text-lg font-semibold">Twitter</div>
+        </div>
+      </div>
     </motion.div>
   );
-} 
+}

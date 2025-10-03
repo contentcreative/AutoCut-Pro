@@ -1,8 +1,36 @@
 "use server";
 
-import { getProfileByUserId, updateProfile } from "@/db/queries/profiles-queries";
+// import { getProfileByUserId, updateProfile } from "@/db/queries/profiles-queries";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+
+// Mock profile functions until the actual queries are implemented
+async function getProfileByUserId(userId: string): Promise<any | null> {
+  console.warn('getProfileByUserId is using mock implementation');
+  return {
+    userId,
+    membership: 'free',
+    status: 'active',
+    usageCredits: 5,
+    usedCredits: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+async function updateProfile(userId: string, data: any): Promise<any | null> {
+  console.warn('updateProfile is using mock implementation');
+  return {
+    userId,
+    membership: 'free',
+    status: 'active',
+    usageCredits: 5,
+    usedCredits: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...data,
+  };
+}
 
 // Constants
 const DEFAULT_USAGE_CREDITS = 1000; // Pro users get 1000 credits per cycle
