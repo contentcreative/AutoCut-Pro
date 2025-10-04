@@ -1,0 +1,21 @@
+# AutoCut Pro Worker Environment Variables
+
+# Server Configuration
+WORKER_PORT=3030
+WORKER_API_KEY=your-worker-api-key-here
+
+# Supabase Configuration
+SUPABASE_URL=your-supabase-url
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+# OpenAI Configuration
+OPENAI_API_KEY=your-openai-api-key
+
+# ElevenLabs Configuration (optional)
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+
+# Stock Footage APIs
+PEXELS_API_KEY=your-pexels-api-key
+
+# External Service URLs
+NEXT_PUBLIC_APP_URL=http://localhost:3000

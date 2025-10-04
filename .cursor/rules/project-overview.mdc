@@ -1,6 +1,1294 @@
 ---
 alwaysApply: true
 ---
+## Feature: AI Video Creation
+
+### Overview
+Generate faceless short-form videos from scratch using AI. Users enter a topic; the system generates a script (LLM), AI voiceover (TTS), selects stock b-roll, builds captions, stitches everything with FFmpeg, and outputs a final video and thumbnail. This feature orchestrates asynchronous media generation with progress tracking, preview, and re-generation options, integrated with Supabase for storage and Clerk for auth.
+
+### User Stories & Requirements
+- As an authenticated creator, I want to create a new AI video by entering a topic so that I can quickly produce a short-form video.
+  - Acceptance:
+    - Topic input validates (3–120 chars)
+    - On submit, a project is created and a generation job starts
+    - User sees real-time status (Queued → Script → Voiceover → B-roll → Rendering → Completed)
+    - If user has no active plan, the action is blocked with an upgrade CTA
+
+- As a creator, I want to customize voice style, captions theme, aspect ratio, and target duration so that the output matches my brand and platform.
+  - Acceptance:
+    - Settings form with: voiceStyle, ttsProvider, captionsTheme, aspectRatio (9:16 default), targetDurationSec (15–60), language (default en)
+    - Updates persist immediately
+    - Settings lock while rendering; re-generation uses latest saved settings
+
+- As a creator, I want to preview the generated video, captions, and thumbnail so that I can decide to finalize or regenerate parts.
+  - Acceptance:
+    - Preview shows video player, generated thumbnail, and caption overlay style
+    - Assets load via signed URLs from Supabase storage
+    - “Regenerate” actions available per-step (script, voiceover, b-roll, captions)
+
+- As a creator, I want real-time progress and error visibility so that I know what’s happening during generation.
+  - Acceptance:
+    - Status updates without page reload (Supabase Realtime)
+    - Errors display with actionable retry/cancel
+    - Logs/errors are persisted for support
+
+- As a creator, I want to download the final MP4 and thumbnail so that I can upload to social platforms.
+  - Acceptance:
+    - Download buttons available when status=ready
+    - Links are valid signed URLs with proper content types
+
+### Technical Implementation
+
+#### Database Schema
+Provide only the tables required for this feature. Drizzle ORM with Postgres via Supabase.
+
+```typescript
+// /db/schema/ai-video.ts
+import {
+  pgTable, uuid, text, timestamp, jsonb, integer, pgEnum, boolean, index
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+
+// Enums
+export const videoStatusEnum = pgEnum('video_status_enum', [
+  'draft', 'queued', 'processing', 'ready', 'failed', 'canceled'
+]);
+
+export const jobStatusEnum = pgEnum('job_status_enum', [
+  'queued', 'generating_script', 'generating_voiceover', 'fetching_broll', 'generating_captions', 'rendering', 'completed', 'failed', 'canceled'
+]);
+
+export const assetTypeEnum = pgEnum('asset_type_enum', [
+  'script', 'voiceover_audio', 'broll_clip', 'subtitle_srt', 'thumbnail_image', 'final_video'
+]);
+
+export const assetStatusEnum = pgEnum('asset_status_enum', [
+  'queued', 'processing', 'ready', 'failed'
+]);
+
+// Projects
+export const aiVideoProjects = pgTable('ai_video_projects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull(), // Clerk userId
+  topic: text('topic').notNull(),
+  status: videoStatusEnum('status').notNull().default('queued'),
+  // Settings
+  ttsProvider: text('tts_provider').notNull().default('elevenlabs'),
+  voiceStyle: text('voice_style').notNull().default('narration_female'),
+  captionsTheme: text('captions_theme').notNull().default('bold-yellow'),
+  aspectRatio: text('aspect_ratio').notNull().default('9:16'),
+  targetDurationSec: integer('target_duration_sec').notNull().default(30),
+  language: text('language').notNull().default('en'),
+  seed: integer('seed'),
+  // Summary metadata
+  durationMs: integer('duration_ms'),
+  width: integer('width'),
+  height: integer('height'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  userIdx: index('ai_video_projects_user_idx').on(table.userId),
+  statusIdx: index('ai_video_projects_status_idx').on(table.status),
+}));
+
+// Generation Jobs
+export const aiGenerationJobs = pgTable('ai_generation_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => aiVideoProjects.id, { onDelete: 'cascade' }),
+  status: jobStatusEnum('status').notNull().default('queued'),
+  currentStep: text('current_step').notNull().default('queued'), // freeform step label
+  progressPct: integer('progress_pct').notNull().default(0), // 0-100
+  errorMessage: text('error_message'),
+  workerId: text('worker_id'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  projIdx: index('ai_generation_jobs_project_idx').on(table.projectId),
+  statusIdx: index('ai_generation_jobs_status_idx').on(table.status),
+}));
+
+// Assets produced/used by the pipeline
+export const aiAssets = pgTable('ai_assets', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => aiVideoProjects.id, { onDelete: 'cascade' }),
+  type: assetTypeEnum('type').notNull(),
+  status: assetStatusEnum('status').notNull().default('queued'),
+  // Storage references (Supabase)
+  storagePath: text('storage_path'), // e.g., videos/{projectId}/final.mp4
+  publicUrl: text('public_url'),     // optional if using public bucket
+  // Metadata
+  durationMs: integer('duration_ms'),
+  width: integer('width'),
+  height: integer('height'),
+  provider: text('provider'), // e.g., 'pexels', 'openai', 'elevenlabs'
+  providerRef: text('provider_ref'), // external ID/reference
+  metadata: jsonb('metadata').$type<Record<string, any>>().default(sql`'{}'::jsonb`),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  projectIdx: index('ai_assets_project_idx').on(table.projectId),
+  typeIdx: index('ai_assets_type_idx').on(table.type),
+}));
+
+// Optional: regeneration requests (per-step)
+export const aiRegenerationRequests = pgTable('ai_regeneration_requests', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  projectId: uuid('project_id').notNull().references(() => aiVideoProjects.id, { onDelete: 'cascade' }),
+  step: text('step').notNull(), // 'script' | 'voiceover' | 'broll' | 'captions' | 'render'
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+```
+
+Supabase Storage buckets (create outside of Drizzle):
+- ai-videos (final videos)
+- ai-audio (voiceovers)
+- ai-captions (SRT/JSON)
+- ai-thumbnails (thumbnails)
+- ai-temp (intermediates, optional/private)
+
+RLS: owner-only read/write on project/asset rows; public read not required. Storage: private buckets, serve via signed URLs.
+
+#### API Endpoints / Server Actions
+Server Actions in Next.js for orchestration and UI binding. Express backend handles heavy media generation.
+
+```typescript
+// /actions/ai-video.ts
+'use server';
+
+import { auth } from '@clerk/nextjs';
+import { db } from '@/db';
+import { aiVideoProjects, aiGenerationJobs, aiAssets } from '@/db/schema/ai-video';
+import { eq } from 'drizzle-orm';
+import { z } from 'zod';
+import { verifyActiveSubscription } from '@/lib/billing';
+import { csFetch } from '@/lib/cs-fetch'; // wrapper around fetch with logging, retries
+
+const CreateProjectSchema = z.object({
+  topic: z.string().min(3).max(120),
+  settings: z.object({
+    ttsProvider: z.string().optional(),
+    voiceStyle: z.string().optional(),
+    captionsTheme: z.string().optional(),
+    aspectRatio: z.enum(['9:16','1:1','16:9']).optional(),
+    targetDurationSec: z.number().min(10).max(90).optional(),
+    language: z.string().optional(),
+    seed: z.number().optional(),
+  }).partial().default({}),
+});
+
+export async function createAIVideoProject(input: z.infer<typeof CreateProjectSchema>) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  await verifyActiveSubscription(userId); // throws if not active
+
+  const data = CreateProjectSchema.parse(input);
+  const [project] = await db.insert(aiVideoProjects).values({
+    userId,
+    topic: data.topic,
+    status: 'queued',
+    ...data.settings,
+  }).returning();
+
+  const [job] = await db.insert(aiGenerationJobs).values({
+    projectId: project.id,
+    status: 'queued',
+    currentStep: 'queued',
+  }).returning();
+
+  // Kick off Express worker
+  await csFetch(`${process.env.WORKER_BASE_URL}/video/generate`, {
+    method: 'POST',
+    headers: { 'x-api-key': process.env.WORKER_API_KEY! },
+    body: JSON.stringify({ jobId: job.id, projectId: project.id }),
+  });
+
+  return { projectId: project.id, jobId: job.id };
+}
+
+const UpdateSettingsSchema = z.object({
+  projectId: z.string().uuid(),
+  settings: z.object({
+    ttsProvider: z.string().optional(),
+    voiceStyle: z.string().optional(),
+    captionsTheme: z.string().optional(),
+    aspectRatio: z.enum(['9:16','1:1','16:9']).optional(),
+    targetDurationSec: z.number().min(10).max(90).optional(),
+    language: z.string().optional(),
+    seed: z.number().optional(),
+  }).partial(),
+});
+
+export async function updateAIVideoSettings(input: z.infer<typeof UpdateSettingsSchema>) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  const { projectId, settings } = UpdateSettingsSchema.parse(input);
+
+  const [project] = await db.update(aiVideoProjects)
+    .set({ ...settings })
+    .where(eq(aiVideoProjects.id, projectId))
+    .returning();
+
+  if (!project || project.userId !== userId) throw new Error('Not found or forbidden');
+  return project;
+}
+
+export async function getAIVideoProject(projectId: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  const [project] = await db.select().from(aiVideoProjects)
+    .where(eq(aiVideoProjects.id, projectId));
+  if (!project || project.userId !== userId) throw new Error('Not found');
+
+  const assets = await db.select().from(aiAssets).where(eq(aiAssets.projectId, projectId));
+  const [job] = await db.select().from(aiGenerationJobs).where(eq(aiGenerationJobs.projectId, projectId));
+
+  return { project, assets, job };
+}
+
+export async function requestRegeneration(projectId: string, step: 'script'|'voiceover'|'broll'|'captions'|'render') {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  // Verify ownership
+  const [project] = await db.select().from(aiVideoProjects).where(eq(aiVideoProjects.id, projectId));
+  if (!project || project.userId !== userId) throw new Error('Not found');
+
+  // Insert regen request (optional, for audit)
+  // Re-enqueue job with step override
+  await csFetch(`${process.env.WORKER_BASE_URL}/video/regenerate`, {
+    method: 'POST',
+    headers: { 'x-api-key': process.env.WORKER_API_KEY! },
+    body: JSON.stringify({ projectId, step }),
+  });
+
+  return { ok: true };
+}
+
+export async function getSignedAssetUrl(assetId: string) {
+  // Use Supabase server client to produce signed URL for private buckets
+  // Implementation outline only
+  return { url: 'SIGNED_URL' };
+}
+```
+
+Express Worker endpoints (Node.js + Express) outline:
+
+```typescript
+// /worker/routes/video.ts
+import { Router } from 'express';
+import { z } from 'zod';
+import { assertWorkerAuth } from '../middleware/auth';
+import { startGenerationPipeline, startRegeneration } from '../services/pipeline';
+
+const router = Router();
+
+router.post('/video/generate', assertWorkerAuth, async (req, res) => {
+  const schema = z.object({ jobId: z.string().uuid(), projectId: z.string().uuid() });
+  const { jobId, projectId } = schema.parse(req.body);
+  startGenerationPipeline({ jobId, projectId }).catch(() => {});
+  res.json({ ok: true });
+});
+
+router.post('/video/regenerate', assertWorkerAuth, async (req, res) => {
+  const schema = z.object({ projectId: z.string().uuid(), step: z.enum(['script','voiceover','broll','captions','render']) });
+  const { projectId, step } = schema.parse(req.body);
+  startRegeneration({ projectId, step }).catch(() => {});
+  res.json({ ok: true });
+});
+
+export default router;
+```
+
+Pipeline outline (Express):
+
+```typescript
+// /worker/services/pipeline.ts
+// Pseudocode-level
+export async function startGenerationPipeline({ jobId, projectId }: { jobId: string; projectId: string }) {
+  // 1) Update job -> generating_script
+  // 2) Call OpenAI to generate script; store in ai_assets(type='script', status='ready')
+  // 3) TTS (ElevenLabs): synthesize voiceover; upload to Supabase(ai-audio), create asset voiceover_audio
+  // 4) Stock footage (Pexels): fetch clips per script segments; download/trim; upload to ai-temp; assets broll_clip
+  // 5) Generate captions (word timings) using TTS or alignment; produce SRT; upload to ai-captions; asset subtitle_srt
+  // 6) FFmpeg: stitch clips + voiceover, burn-in styled captions (or leave sidecar), render final MP4; upload to ai-videos; asset final_video
+  // 7) Generate thumbnail from a frame or simple template; upload to ai-thumbnails; asset thumbnail_image
+  // 8) Update job -> completed, project -> ready (width/height/duration)
+}
+```
+
+Optional Webhook (if worker prefers to call back vs direct DB writes):
+
+```typescript
+// /app/api/ai-video/webhook/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { aiGenerationJobs, aiVideoProjects, aiAssets } from '@/db/schema/ai-video';
+import { verifyWorkerSignature } from '@/lib/webhooks';
+
+export async function POST(req: NextRequest) {
+  const body = await req.text();
+  if (!verifyWorkerSignature(req.headers, body)) return new NextResponse('Invalid signature', { status: 401 });
+
+  const payload = JSON.parse(body);
+  // upsert job status, insert/update assets, update project status, etc.
+  return NextResponse.json({ ok: true });
+}
+```
+
+#### Components Structure
+Components for this feature (Server/Client components per file):
+
+```
+/components/ai-video/
+├── create-from-scratch-form.tsx        // Client: topic input, submit -> createAIVideoProject
+├── settings-panel.tsx                  // Client: voice, captionsTheme, aspectRatio, duration
+├── generation-progress.tsx             // Client: subscribes to Supabase Realtime for job status
+├── preview-player.tsx                  // Client: video player with signed URL and caption overlay
+├── asset-list.tsx                      // Server/Client: list of produced assets with download buttons
+└── regenerate-controls.tsx             // Client: buttons to re-run steps
+```
+
+Recommended pages:
+
+```
+/app/ai/create/page.tsx                 // Server: renders Create form + settings; starts job
+/app/ai/[projectId]/page.tsx            // Server: loads project; mounts progress, preview, controls
+```
+
+#### State Management
+- Mutations: Next.js Server Actions (createAIVideoProject, updateAIVideoSettings, requestRegeneration).
+- Server state: fetched in Server Components (getAIVideoProject) for initial render.
+- Real-time updates: Supabase Realtime channel on ai_generation_jobs (projectId scoped). Client component subscribes and updates UI (progress, step, errors).
+- Asset URLs: fetched via server action to generate signed URLs; cached client-side per session.
+
+### Dependencies & Integrations
+- OpenAI (GPT) for script generation: openai SDK on worker
+- TTS provider (default ElevenLabs): elevenlabs npm or REST
+- Stock B-roll (Pexels): pexels npm or REST
+- FFmpeg: system dependency; use fluent-ffmpeg or spawn ffmpeg
+- Supabase:
+  - Postgres (Drizzle ORM) for projects/jobs/assets
+  - Storage for media files
+  - Realtime for progress updates
+- Clerk.dev for user auth in Next.js
+- Whop: verifyActiveSubscription helper before job creation
+- Additional npm (worker):
+  - openai
+  - elevenlabs (or @elevenlabs/elevenlabs)
+  - pexels
+  - fluent-ffmpeg
+  - node-fetch/undici
+  - srt parser (e.g., srt-parser-2) if needed
+  - sharp (thumbnail post-processing, optional)
+
+### Implementation Steps
+1. Create database schema
+   - Add /db/schema/ai-video.ts as above
+   - Run Drizzle migrations: drizzle-kit generate, then push to Supabase
+   - Configure RLS policies for ai_video_projects, ai_assets, ai_generation_jobs (owner-only)
+
+2. Generate queries
+   - Add db index file export for new tables
+   - Create typed query helpers if needed
+
+3. Implement server actions
+   - /actions/ai-video.ts with create, update, get, regenerate, sign URL
+   - Hook into Clerk auth and Whop subscription check
+   - Build csFetch with retries and logging
+
+4. Build UI components
+   - Create from scratch form with topic validation, submit -> createAIVideoProject
+   - Settings panel bound to updateAIVideoSettings
+   - Generation progress subscribing to Supabase Realtime (project job channel)
+   - Preview player loading signed URL, show captions theme preview
+   - Asset list with download buttons and regeneration controls
+
+5. Connect frontend to backend
+   - On create success, route to /ai/[projectId]
+   - Initialize realtime subscription by projectId
+   - Implement signed URL fetching for private assets
+
+6. Add error handling
+   - Server actions: try/catch, structured errors, user-safe messages
+   - Worker: update job/project status on failure; persist errorMessage
+   - UI: show retry/cancel; disable conflicting actions during processing
+   - Logging: console + remote (optional) with correlation IDs (jobId, projectId)
+
+7. Test the feature
+   - Unit tests for server actions and schema constraints
+   - Integration tests mocking worker HTTP and Supabase
+   - E2E UI flow: create → progress → preview → download
+   - Load tests for worker queue bootstrap (optional)
+
+### Edge Cases & Error Handling
+- No active subscription: block create with Upgrade prompt.
+- External API failures (OpenAI, TTS, Pexels):
+  - Retry with exponential backoff (worker)
+  - If persistent, mark job failed; show retry option
+- TTS length or rate limits:
+  - Split script into chunks; reassemble audio
+  - Respect provider rate limits with queueing
+- No suitable b-roll found:
+  - Fallback to generic stock clips
+  - Reduce search filters, log warning
+- FFmpeg errors (codec, concat):
+  - Validate inputs; normalize to common codec/format
+  - Fallback rendering pipeline without burn-in captions (use sidecar)
+- Supabase storage upload failure:
+  - Retry uploads
+  - Clean up partial files; keep job failed with trace
+- Long-running tasks/timeouts:
+  - Heartbeat updates in aiGenerationJobs
+  - Mark as failed if no update for N minutes; allow resume
+- Cancel during processing:
+  - Optional: user-triggered cancel calls worker; worker aborts and marks canceled
+- Permissions:
+  - Enforce RLS: users can only read/write their own projects/assets
+  - Signed URLs expiry (e.g., 15 minutes); refresh on demand
+
+### Testing Approach
+- Unit tests
+  - Server actions: input validation (zod), auth gating, subscription check
+  - Drizzle queries: insert/select with fixtures; enum transitions
+  - Utility: csFetch retry logic
+- Integration tests
+  - Mock WORKER endpoints to validate orchestration (enqueue, regen)
+  - Supabase storage signed URL generation
+  - Realtime subscription updates reflected in UI state
+- User acceptance tests (UAT)
+  - Create from scratch with topic; verify progress phases
+  - Change settings before generation completes; ensure applied on regen
+  - Preview and download final video/thumbnail
+  - Failure scenario: force TTS failure; verify error surfaced and retry works
+
+Notes:
+- Environment variables
+  - WORKER_BASE_URL, WORKER_API_KEY
+  - OPENAI_API_KEY, ELEVENLABS_API_KEY, PEXELS_API_KEY
+  - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (worker only), SUPABASE_ANON_KEY (Next.js)
+- Storage paths convention
+  - ai-videos/{projectId}/final.mp4
+  - ai-audio/{projectId}/voiceover.mp3
+  - ai-captions/{projectId}/captions.srt
+  - ai-thumbnails/{projectId}/thumb.jpg
+  - ai-temp/{projectId}/* (cleanup optional)
+
+Security:
+- Never expose service role key to client; worker only
+- Signed webhook or direct DB writes from worker (preferred: direct DB with service role and strict IP allowlist if possible)
+- Validate all inputs and step transitions on the worker to prevent inconsistent state
+
+## Feature: Trending Remix
+
+### Overview
+Trending Remix lets creators discover trending short-form videos in a selected niche (YouTube Shorts initially; TikTok/Instagram via compliant providers), rank them with a custom virality score, and instantly generate an original, faceless remix. The remix workflow rewrites scripts with an LLM, synthesizes new voiceover, assembles stock/templated visuals with FFmpeg, and publishes the output to Supabase Storage—ready to post.
+
+### User Stories & Requirements
+- As an authenticated creator, I want to select a niche and see a ranked list of trending short videos so that I can quickly identify high-potential content to remix.
+  - Acceptance:
+    - Can filter by niche and platform.
+    - List displays title, creator, platform, metrics (views, likes, comments, shares), age, duration, and virality score.
+    - Sort by virality score by default; sortable by any metric.
+    - Pagination or infinite scroll supports at least 200 items without UI lag.
+
+- As a creator, I want to click “Remix” on a trending item to configure output (voice, style, aspect ratio, duration) so that the result fits my channel’s brand.
+  - Acceptance:
+    - Remix drawer opens with configuration fields (voice model, aspect ratio: 9:16/1:1/16:9, target duration, style preset).
+    - Input is validated; submit is disabled until valid.
+
+- As a creator, I want the system to generate an original faceless remix from the selected trend so that I can post it without manual effort.
+  - Acceptance:
+    - On submit, a Remix job is created, queued, and visible in a “Jobs” list with live status updates (Queued/Processing/Completed/Failed).
+    - On completion, output video URL is available; user can preview and download.
+    - If job fails, an error message is shown with a retry option.
+
+- As a paying subscriber, I want access gated so that only active subscriptions can use Remix.
+  - Acceptance:
+    - Users without an active Whop subscription see an upgrade prompt and cannot invoke Remix.
+    - Server actions enforce entitlement checks.
+
+- As a creator, I want to understand why a video ranked highly so that I trust the recommendations.
+  - Acceptance:
+    - Hover or info icon shows virality score breakdown (weights and key metrics).
+
+### Technical Implementation
+
+#### Database Schema
+```typescript
+// /db/schema/trending-remix.ts
+import {
+  pgTable, uuid, text, timestamp, integer, bigint, numeric, jsonb, pgEnum, index, uniqueIndex, boolean
+} from 'drizzle-orm/pg-core';
+
+export const platformEnum = pgEnum('platform', ['youtube', 'tiktok', 'instagram']);
+export const jobStatusEnum = pgEnum('remix_job_status', ['queued','processing','completed','failed','cancelled']);
+export const jobStepEnum = pgEnum('remix_job_step', ['init','fetch_transcript','rewrite_script','tts','assemble','upload','done']);
+
+export const trendingVideos = pgTable('trending_videos', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  platform: platformEnum('platform').notNull(),
+  sourceVideoId: text('source_video_id').notNull(),
+  niche: text('niche').notNull(),
+  title: text('title').notNull(),
+  creatorHandle: text('creator_handle'),
+  thumbnailUrl: text('thumbnail_url'),
+  permalink: text('permalink').notNull(), // canonical URL to source
+  durationSeconds: integer('duration_seconds'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  viewsCount: bigint('views_count', { mode: 'number' }).default(0),
+  likesCount: bigint('likes_count', { mode: 'number' }).default(0),
+  commentsCount: bigint('comments_count', { mode: 'number' }).default(0),
+  sharesCount: bigint('shares_count', { mode: 'number' }).default(0),
+  viralityScore: numeric('virality_score', { precision: 8, scale: 4 }).default('0').notNull(),
+  scoreBreakdown: jsonb('score_breakdown'), // weights and normalized metrics
+  raw: jsonb('raw'), // raw API payload
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  uniq: uniqueIndex('uniq_platform_source').on(t.platform, t.sourceVideoId),
+  nicheIdx: index('idx_trending_niche').on(t.niche),
+  scoreIdx: index('idx_trending_score').on(t.viralityScore),
+  publishedIdx: index('idx_trending_published').on(t.publishedAt),
+}));
+
+export const remixJobs = pgTable('remix_jobs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull(), // Clerk user id
+  trendingVideoId: uuid('trending_video_id').references(() => trendingVideos.id, { onDelete: 'set null' }),
+  niche: text('niche'),
+  status: jobStatusEnum('status').notNull().default('queued'),
+  step: jobStepEnum('step').default('init'),
+  options: jsonb('options'), // {voiceModel, aspectRatio, targetDuration, stylePreset, language, musicPack, ...}
+  rewrittenScript: text('rewritten_script'),
+  transcriptUrl: text('transcript_url'), // Supabase file URL for original transcript
+  outputVideoUrl: text('output_video_url'),
+  outputThumbnailUrl: text('output_thumbnail_url'),
+  voiceModel: text('voice_model'),
+  aspectRatio: text('aspect_ratio'),
+  durationSeconds: integer('duration_seconds'),
+  tokensUsed: integer('tokens_used').default(0),
+  ttsSeconds: integer('tts_seconds').default(0),
+  costEstimateCents: integer('cost_estimate_cents').default(0),
+  error: text('error'),
+  internalOnly: boolean('internal_only').default(false), // e.g., for test jobs
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (t) => ({
+  userIdx: index('idx_remix_user').on(t.userId),
+  statusIdx: index('idx_remix_status').on(t.status),
+  trendingIdx: index('idx_remix_trending').on(t.trendingVideoId),
+}));
+
+export const trendingFetchRuns = pgTable('trending_fetch_runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  platform: platformEnum('platform').notNull(),
+  niche: text('niche').notNull(),
+  totalFound: integer('total_found').default(0),
+  totalInserted: integer('total_inserted').default(0),
+  error: text('error'),
+  startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (t) => ({
+  nichePlatIdx: index('idx_fetch_niche_platform').on(t.niche, t.platform),
+}));
+```
+
+Storage buckets (Supabase):
+- remixes: final videos and thumbnails
+- transcripts: original transcripts (if generated)
+- scripts: rewritten script JSON/txt
+
+Security:
+- All server actions validate Clerk user and Whop entitlement.
+- Only the job owner can read/update their remix_jobs rows.
+
+#### API Endpoints / Server Actions
+```typescript
+// /lib/virality.ts
+export type ViralityInput = {
+  views: number; likes: number; comments: number; shares: number;
+  ageHours: number; durationSec?: number;
+};
+export function computeViralityScore(v: ViralityInput) {
+  // Normalize per-hour engagement to favor recency
+  const perHour = (x: number) => x / Math.max(v.ageHours, 1);
+  const w = { views: 0.35, likes: 0.25, comments: 0.2, shares: 0.2 };
+  const raw =
+    w.views * Math.log10(1 + perHour(v.views)) +
+    w.likes * Math.log10(1 + perHour(v.likes)) +
+    w.comments * Math.log10(1 + perHour(v.comments)) +
+    w.shares * Math.log10(1 + perHour(v.shares));
+  // Optional duration penalty for very long videos in shorts context
+  const durPenalty = v.durationSec && v.durationSec > 75 ? 0.9 : 1;
+  const score = +(Math.min(raw * durPenalty, 5)).toFixed(4); // cap 0-5
+  return { score, breakdown: { ...w, ageHours: v.ageHours, durationSec: v.durationSec } };
+}
+```
+
+```typescript
+// /lib/integrations/youtube.ts
+import { google } from 'googleapis';
+
+export async function fetchYouTubeShortsTrending(niche: string, max = 50) {
+  // Strategy: search by niche with filters for short duration + high viewCount, then hydrate stats
+  const yt = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
+  const search = await yt.search.list({
+    q: niche, type: ['video'], maxResults: Math.min(max, 50),
+    videoDuration: 'short', order: 'viewCount', part: ['snippet'],
+  });
+  const ids = (search.data.items ?? []).map(i => i.id?.videoId).filter(Boolean) as string[];
+  if (!ids.length) return [];
+  const videos = await yt.videos.list({ id: ids, part: ['snippet','statistics','contentDetails'] });
+  return (videos.data.items ?? []).map(v => ({
+    platform: 'youtube' as const,
+    sourceVideoId: v.id!,
+    title: v.snippet?.title ?? '',
+    creatorHandle: v.snippet?.channelTitle ?? '',
+    thumbnailUrl: v.snippet?.thumbnails?.medium?.url ?? '',
+    permalink: `https://www.youtube.com/watch?v=${v.id}`,
+    publishedAt: v.snippet?.publishedAt ? new Date(v.snippet.publishedAt) : null,
+    viewsCount: Number(v.statistics?.viewCount ?? 0),
+    likesCount: Number(v.statistics?.likeCount ?? 0),
+    commentsCount: Number(v.statistics?.commentCount ?? 0),
+    sharesCount: 0, // not available via API
+    durationSeconds: parseISODurationToSeconds(v.contentDetails?.duration),
+    raw: v,
+  }));
+}
+
+function parseISODurationToSeconds(iso?: string) {
+  if (!iso) return null;
+  // basic ISO8601 PT#M#S parser
+  const m = /PT(?:(\d+)M)?(?:(\d+)S)?/.exec(iso);
+  const mins = m?.[1] ? parseInt(m[1]) : 0;
+  const secs = m?.[2] ? parseInt(m[2]) : 0;
+  return mins * 60 + secs;
+}
+```
+
+```typescript
+// /lib/integrations/shorts-providers.ts
+// Placeholder interfaces for TikTok/Instagram via compliant providers (e.g., Apify, authorized APIs)
+export async function fetchTikTokTrending(niche: string, max = 50) {
+  // Implement via approved provider; return normalized items same shape as YouTube fetch
+  return [];
+}
+export async function fetchInstagramReelsTrending(niche: string, max = 50) {
+  return [];
+}
+```
+
+```typescript
+// /actions/trending-remix-actions.ts
+'use server';
+
+import { auth } from '@clerk/nextjs';
+import { db } from '@/db';
+import { trendingVideos, remixJobs, trendingFetchRuns } from '@/db/schema/trending-remix';
+import { eq, and, desc } from 'drizzle-orm';
+import { computeViralityScore } from '@/lib/virality';
+import { fetchYouTubeShortsTrending } from '@/lib/integrations/youtube';
+import { fetchTikTokTrending, fetchInstagramReelsTrending } from '@/lib/integrations/shorts-providers';
+import { validateWhopEntitlement } from '@/lib/payments/whop';
+import { z } from 'zod';
+import { createHmac } from 'node:crypto';
+
+const FetchSchema = z.object({
+  niche: z.string().min(2),
+  platforms: z.array(z.enum(['youtube','tiktok','instagram'])).default(['youtube']),
+  max: z.number().min(5).max(100).default(50),
+});
+
+export async function fetchAndUpsertTrending(input: unknown) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  const { niche, platforms, max } = FetchSchema.parse(input);
+
+  const run = await db.insert(trendingFetchRuns).values({ niche, platform: 'youtube' }).returning({ id: trendingFetchRuns.id });
+
+  const sources = [];
+  if (platforms.includes('youtube')) sources.push(fetchYouTubeShortsTrending(niche, max));
+  if (platforms.includes('tiktok')) sources.push(fetchTikTokTrending(niche, max));
+  if (platforms.includes('instagram')) sources.push(fetchInstagramReelsTrending(niche, max));
+
+  const results = (await Promise.allSettled(sources)).flatMap(r => r.status === 'fulfilled' ? r.value : []);
+  let inserted = 0;
+
+  for (const item of results) {
+    const now = new Date();
+    const ageHours = item.publishedAt ? Math.max(1, (now.getTime() - item.publishedAt.getTime()) / 36e5) : 24;
+    const { score, breakdown } = computeViralityScore({
+      views: item.viewsCount ?? 0,
+      likes: item.likesCount ?? 0,
+      comments: item.commentsCount ?? 0,
+      shares: item.sharesCount ?? 0,
+      ageHours,
+      durationSec: item.durationSeconds ?? undefined,
+    });
+
+    try {
+      await db
+        .insert(trendingVideos)
+        .values({
+          platform: item.platform,
+          sourceVideoId: item.sourceVideoId,
+          niche,
+          title: item.title ?? '',
+          creatorHandle: item.creatorHandle ?? null,
+          thumbnailUrl: item.thumbnailUrl ?? null,
+          permalink: item.permalink,
+          durationSeconds: item.durationSeconds ?? null,
+          publishedAt: item.publishedAt ?? null,
+          viewsCount: item.viewsCount ?? 0,
+          likesCount: item.likesCount ?? 0,
+          commentsCount: item.commentsCount ?? 0,
+          sharesCount: item.sharesCount ?? 0,
+          viralityScore: score.toString(),
+          scoreBreakdown: breakdown,
+          raw: item.raw ?? null,
+        })
+        .onConflictDoUpdate({
+          target: [trendingVideos.platform, trendingVideos.sourceVideoId],
+          set: {
+            title: item.title ?? '',
+            thumbnailUrl: item.thumbnailUrl ?? null,
+            viewsCount: item.viewsCount ?? 0,
+            likesCount: item.likesCount ?? 0,
+            commentsCount: item.commentsCount ?? 0,
+            sharesCount: item.sharesCount ?? 0,
+            viralityScore: score.toString(),
+            scoreBreakdown: breakdown,
+            fetchedAt: new Date(),
+          },
+        });
+      inserted++;
+    } catch (e) {
+      // swallow individual upsert errors with logging
+      console.error('Upsert trending error', e);
+    }
+  }
+
+  await db.update(trendingFetchRuns).set({
+    totalFound: results.length,
+    totalInserted: inserted,
+    completedAt: new Date(),
+  }).where(eq(trendingFetchRuns.id, run[0].id));
+
+  return { totalFound: results.length, totalInserted: inserted };
+}
+
+const RemixInput = z.object({
+  trendingVideoId: z.string().uuid(),
+  options: z.object({
+    voiceModel: z.string().default('alloy'),
+    aspectRatio: z.enum(['9:16','1:1','16:9']).default('9:16'),
+    targetDuration: z.number().min(10).max(90).default(60),
+    stylePreset: z.enum(['news','listicle','story','tips']).default('listicle'),
+    language: z.string().default('en'),
+  }),
+});
+
+export async function createRemixJob(input: unknown) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  await validateWhopEntitlement(userId); // throws if not entitled
+
+  const { trendingVideoId, options } = RemixInput.parse(input);
+  const [trend] = await db.select().from(trendingVideos)
+    .where(eq(trendingVideos.id, trendingVideoId)).limit(1);
+  if (!trend) throw new Error('Trending video not found');
+
+  const [job] = await db.insert(remixJobs).values({
+    userId,
+    trendingVideoId,
+    niche: trend.niche,
+    status: 'queued',
+    step: 'init',
+    options,
+    voiceModel: options.voiceModel,
+    aspectRatio: options.aspectRatio,
+    durationSeconds: options.targetDuration,
+  }).returning();
+
+  // Notify video remix worker (Express service)
+  await fetch(`${process.env.REMIX_SERVICE_URL}/jobs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Auth': process.env.REMIX_SERVICE_TOKEN!,
+    },
+    body: JSON.stringify({
+      jobId: job.id,
+      userId,
+      source: { platform: trend.platform, permalink: trend.permalink, title: trend.title },
+      options,
+      webhookUrl: `${process.env.NEXT_PUBLIC_APP_URL}/api/remix/webhook`,
+    }),
+  }).then(r => {
+    if (!r.ok) throw new Error(`Remix service error: ${r.status}`);
+  });
+
+  return { jobId: job.id };
+}
+
+export async function getUserRemixJobs() {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  const rows = await db.select().from(remixJobs)
+    .where(eq(remixJobs.userId, userId))
+    .orderBy(desc(remixJobs.createdAt))
+    .limit(50);
+  return rows;
+}
+
+export async function cancelRemixJob(jobId: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  await db.update(remixJobs)
+    .set({ status: 'cancelled', updatedAt: new Date() })
+    .where(and(eq(remixJobs.id, jobId), eq(remixJobs.userId, userId)));
+  await fetch(`${process.env.REMIX_SERVICE_URL}/jobs/${jobId}/cancel`, {
+    method: 'POST', headers: { 'X-Auth': process.env.REMIX_SERVICE_TOKEN! },
+  }).catch(() => {});
+  return { ok: true };
+}
+```
+
+```typescript
+// /app/api/remix/webhook/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db';
+import { remixJobs, jobStatusEnum, jobStepEnum } from '@/db/schema/trending-remix';
+import { eq } from 'drizzle-orm';
+
+export async function POST(req: NextRequest) {
+  const token = req.headers.get('x-auth');
+  if (token !== process.env.REMIX_SERVICE_TOKEN) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const body = await req.json();
+  // body: { jobId, status, step, transcriptUrl?, rewrittenScript?, outputVideoUrl?, outputThumbnailUrl?, tokensUsed?, ttsSeconds?, costEstimateCents?, error? }
+  const { jobId, ...rest } = body;
+  await db.update(remixJobs).set({
+    status: rest.status,
+    step: rest.step,
+    transcriptUrl: rest.transcriptUrl ?? null,
+    rewrittenScript: rest.rewrittenScript ?? null,
+    outputVideoUrl: rest.outputVideoUrl ?? null,
+    outputThumbnailUrl: rest.outputThumbnailUrl ?? null,
+    tokensUsed: rest.tokensUsed ?? undefined,
+    ttsSeconds: rest.ttsSeconds ?? undefined,
+    costEstimateCents: rest.costEstimateCents ?? undefined,
+    error: rest.error ?? null,
+    updatedAt: new Date(),
+    startedAt: rest.step === 'init' ? new Date() : undefined,
+    completedAt: rest.status === 'completed' ? new Date() : undefined,
+  }).where(eq(remixJobs.id, jobId));
+  return NextResponse.json({ ok: true });
+}
+```
+
+Remix Worker (Express + FFmpeg) outline:
+- Endpoints:
+  - POST /jobs: create job, enqueue internal queue; respond 202.
+  - POST /jobs/:id/cancel: mark cancelled if not started.
+- Steps per job:
+  1) fetch_transcript: Try platform captions API; fallback to download audio and run Whisper (OpenAI or local).
+  2) rewrite_script: Use OpenAI Chat Completions; prompt for novelty and style per options.
+  3) tts: Use TTS API (OpenAI TTS or ElevenLabs) to generate voiceover; store in Supabase.
+  4) assemble: Use FFmpeg to combine stock assets/templates, captions (optional), motion graphics; conform aspect ratio.
+  5) upload: Upload final MP4 and thumbnail to Supabase Storage; generate signed public URLs.
+  6) POST webhook with status updates between steps.
+
+Environment required:
+- YOUTUBE_API_KEY
+- APIFY_TOKEN or provider tokens (if using external for TikTok/Instagram)
+- OPENAI_API_KEY
+- TTS_API_KEY (if not using OpenAI TTS)
+- SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL (for worker upload)
+- REMIX_SERVICE_URL, REMIX_SERVICE_TOKEN
+- NEXT_PUBLIC_APP_URL
+
+#### Components Structure
+```
+/components/trending-remix/
+├── trending-remix-filters.tsx          // niche input, platform multi-select, fetch button
+├── trending-table.tsx                   // ShadCN table: rows of trendingVideos
+├── virality-badge.tsx                   // colored badge + tooltip with breakdown
+├── remix-drawer.tsx                     // slide-over config form + submit action
+├── remix-job-list.tsx                   // list of user's recent jobs
+├── remix-status-chip.tsx                // status + step indicator
+└── remix-preview.tsx                    // video player for completed job
+```
+
+Pages:
+- /app/(dashboard)/trending-remix/page.tsx: Server component page composing filters, table, jobs list.
+
+Example component usage:
+- trending-table.tsx uses DataTable from ShadCN, with columns: Thumbnail, Title, Platform, Creator, Views, Likes, Comments, Shares, Age, Duration, Virality, Actions.
+- remix-drawer.tsx uses ShadCN Drawer/Dialog, Selects, Sliders, and Form.
+
+#### State Management
+- Server Components for initial data read (best SEO and perf).
+- Client Components for interactive filters, table sorting, remix drawer, and job list.
+- Data mutations via Next.js Server Actions (createRemixJob, fetchAndUpsertTrending).
+- Real-time job status: Supabase Realtime subscription to remix_jobs table filtered by user_id OR fallback to polling getUserRemixJobs every 5s.
+- Local UI state with React state/hooks; transitions via useTransition when invoking server actions.
+- Toast notifications on job created, completed, or failed (ShadCN toast).
+
+### Dependencies & Integrations
+- YouTube Data API v3 (official)
+- TikTok/Instagram via compliant third-party providers (e.g., Apify) or approved APIs
+- OpenAI API (LLM for script rewriting, Whisper for transcription if needed, TTS if using OpenAI)
+- FFmpeg (installed in Remix Worker container)
+- Supabase Storage for assets
+- Clerk for auth; Whop for subscription checks
+- npm packages:
+  - googleapis (YouTube)
+  - openai
+  - zod
+  - axios or node-fetch
+  - @supabase/supabase-js (in worker)
+  - uuid
+  - eventsource-parser (optional for streamed LLM)
+  - apify-client (if using Apify)
+
+### Implementation Steps
+1. Create database schema
+   - Add /db/schema/trending-remix.ts and run Drizzle migrations.
+   - Create Supabase buckets: remixes, transcripts, scripts (set RLS as needed; worker uses service role).
+
+2. Generate queries
+   - Drizzle db accessors for trendingVideos, remixJobs.
+   - Utility to compute virality score.
+
+3. Implement server actions
+   - fetchAndUpsertTrending input validation, compute scores, upsert rows.
+   - createRemixJob with Whop entitlement check, post to Remix Worker.
+   - getUserRemixJobs, cancelRemixJob.
+   - Webhook endpoint for job updates.
+
+4. Build UI components
+   - Filters: niche text, platform multi-select, fetch button -> calls fetchAndUpsertTrending.
+   - Trending Table: load top 100 by viralityScore desc for selected niche; action column opens Remix Drawer.
+   - Remix Drawer: form submits to createRemixJob; show optimistic toast.
+   - Jobs List: subscribe to Supabase Realtime to reflect status changes; display preview for completed jobs.
+
+5. Connect frontend to backend
+   - Wire server actions to components; ensure Clerk auth on server.
+   - Supabase client in browser for realtime subscription with row-level filter user_id == current user.
+
+6. Add error handling
+   - Gracefully handle API quota errors (YouTube) with user feedback.
+   - Display failures in Jobs list and allow retry (recreate job).
+   - Validate options; disable submit if invalid.
+   - Secure webhook with token check.
+
+7. Test the feature
+   - Unit tests for computeViralityScore edge cases.
+   - Integration tests mocking YouTube API and Remix Worker.
+   - E2E tests for the full user flow (Playwright).
+
+### Edge Cases & Error Handling
+- API quota exhausted or provider failures:
+  - Show a non-blocking toast and partial results; log run error in trendingFetchRuns.
+- No results for selected niche:
+  - Show empty state with suggestions; allow user to broaden niche.
+- Duplicate entries:
+  - Handled by unique index; onConflictDoUpdate refreshes metrics and score.
+- Missing metrics (e.g., like counts hidden):
+  - Treat as 0; note in scoreBreakdown for transparency.
+- Platform policy/availability changes:
+  - Feature-gate TikTok/Instagram fetch behind env flags; degrade gracefully to YouTube only.
+- LLM rewrite fails or content violates policy:
+  - Mark job failed with error; do not proceed to TTS/assemble; allow retry.
+- TTS rate limits:
+  - Exponential backoff and retry; if final fail, mark job failed.
+- FFmpeg assembly fails (asset missing, codec error):
+  - Capture stderr logs; mark failed with actionable error.
+- Storage upload fails:
+  - Retry with backoff; if persistent, fail job.
+- User cancels job mid-run:
+  - Worker checks cancel flag between steps; abort gracefully.
+- Compliance:
+  - Only use source content for metadata/transcript to produce novel output; never reuse raw source A/V in final remix.
+
+### Testing Approach
+- Unit tests
+  - computeViralityScore: verify recency weighting, duration penalty, caps.
+  - zod schemas: invalid inputs rejected.
+- Integration tests
+  - fetchAndUpsertTrending with mocked YouTube client; ensure DB upserts and scoring.
+  - createRemixJob posts to worker; webhook updates job rows correctly.
+  - Supabase realtime subscription updates UI state (mock).
+- User acceptance tests
+  - Flow: select niche -> fetch -> see ranked list -> remix -> job appears -> completes -> preview playable.
+  - Error flows: entitlement missing, API failure, worker failure, cancel job.
+  - Sorting and filtering persist and function across reloads.
+
+Additional Implementation Notes:
+- UI/UX
+  - Use ShadCN Table, Drawer, Select, Badge, Tooltip, Toast.
+  - Framer Motion for table row entrance and job status transitions.
+- Security
+  - Server actions check auth and entitlement; do not expose service tokens to client.
+  - Webhook secured by REMIX_SERVICE_TOKEN; reject unsigned requests.
+- Observability
+  - Console logging with structured messages in server actions and worker; integrate Sentry or Vercel Logging if available.
+- Performance
+  - Limit initial fetch to 100 items; infinite scroll for more.
+  - Avoid heavy processing in Next.js; offload to worker.
+- Configuration Flags
+  - FEATURE_TIKTOK_ENABLED, FEATURE_INSTAGRAM_ENABLED to toggle providers.
+  - REMIX_ALLOW_WHISPER_LOCAL to switch between OpenAI Whisper API vs local.
+
+  ## Feature: Smart Exports
+
+### Overview
+Smart Exports packages final content into a ready-to-post bundle that includes:
+- Multi-format videos (e.g., 9:16, 1:1, 16:9) with brand kit styling applied
+- Branded PNG thumbnails per format
+- Optimized metadata files (title.txt, description.txt, hashtags.txt)
+- A single ZIP archive stored in Supabase Storage with a time-limited download link
+
+This feature streamlines distribution, ensures brand consistency, and reduces prep time by giving creators a one-click export flow.
+
+### User Stories & Requirements
+- As a creator, I want to select export formats (aspect ratios, resolution, FPS, bitrate) so that I can post content across different platforms.
+  - Acceptance:
+    - User can pick one or multiple formats from defaults (9:16 1080x1920, 1:1 1080x1080, 16:9 1920x1080)
+    - Validation prevents submitting with no formats selected
+    - Form persists previous selections within session
+
+- As a creator, I want brand kit styling applied to all exports so that my content stays on-brand.
+  - Acceptance:
+    - User can select a brand kit (if available)
+    - Exports include watermark/logo overlay and color styling per brand kit settings
+    - Thumbnails include brand elements
+
+- As a creator, I want metadata files generated (title, description, hashtags) so that I can quickly copy/paste on each platform.
+  - Acceptance:
+    - Export bundle includes title.txt, description.txt, hashtags.txt
+    - Metadata is sourced from the finalized content record (existing pipeline) and/or overrides in preferences
+
+- As a creator, I want a ZIP bundle to download or save to cloud so that I can easily distribute assets.
+  - Acceptance:
+    - ZIP contains per-format videos, thumbnails, metadata files
+    - File/folder structure is clear and predictable
+    - User can download via signed URL
+    - Download button only enabled when status is ready
+
+- As a creator, I want to see export progress and status so that I know when it’s ready.
+  - Acceptance:
+    - Job statuses: queued, processing, packaging, uploaded, ready, failed, canceled
+    - Progress bar updates periodically (polling)
+    - Errors are visible with retry guidance
+
+- As an admin, I want storage to be private and downloadable via signed URL so that content is secure.
+  - Acceptance:
+    - Exports saved in a private Supabase Storage bucket
+    - Signed URLs expire (e.g., 5 minutes)
+    - Only job owner can request a signed download URL
+
+- As a paying user, I want exports only if my subscription is active so that licensing is enforced.
+  - Acceptance:
+    - Job creation checks Whop subscription status
+    - If inactive, export is blocked with actionable message
+
+### Technical Implementation
+
+#### Database Schema
+Provide the Drizzle ORM schema ONLY for tables needed by this feature.
+
+```typescript
+// /db/schema/exports.ts
+import {
+  pgTable,
+  uuid,
+  text,
+  jsonb,
+  timestamp,
+  integer,
+  pgEnum,
+  bigint,
+  index,
+} from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+
+export const exportStatusEnum = pgEnum('export_status', [
+  'queued',
+  'processing',
+  'packaging',
+  'uploaded',
+  'ready',
+  'failed',
+  'canceled',
+]);
+
+export const exportAssetTypeEnum = pgEnum('export_asset_type', [
+  'video',
+  'thumbnail',
+  'metadata',
+  'archive',
+]);
+
+export const exportJobs = pgTable(
+  'export_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Owner (Clerk user id)
+    userId: text('user_id').notNull(),
+
+    // Relates to content/render from upstream pipeline
+    projectId: uuid('project_id'),
+    contentId: uuid('content_id'),
+
+    // Optional brand kit reference (UUID from brand kits feature)
+    brandKitId: uuid('brand_kit_id'),
+
+    // Requested output formats; array of { ratio, resolution, bitrate, fps }
+    formats: jsonb('formats').$type<
+      Array<{
+        ratio: '9:16' | '1:1' | '16:9';
+        resolution: string; // e.g., "1080x1920"
+        bitrate?: string; // e.g., "8M"
+        fps?: number; // e.g., 30
+      }>
+    >().notNull(),
+
+    // Additional options
+    options: jsonb('options').$type<{
+      generateThumbnails?: boolean;
+      thumbnailTimecode?: string; // e.g., "00:00:02"
+      metadataOverrides?: {
+        title?: string;
+        description?: string;
+        hashtags?: string[];
+      };
+      outputNaming?: string; // e.g., "{title}-{ratio}"
+    }>(),
+
+    // Storage configuration
+    storageBucket: text('storage_bucket').notNull().default('exports'),
+    zipStoragePath: text('zip_storage_path'), // e.g., "exports/{userId}/{jobId}/export.zip"
+
+    // Source assets (filled at job creation from upstream pipeline)
+    sourceVideoPath: text('source_video_path').notNull(), // Supabase Storage key to master video
+
+    // Status
+    status: exportStatusEnum('status').notNull().default('queued'),
+    progress: integer('progress').notNull().default(0),
+    error: text('error'),
+
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    userIdx: index('export_jobs_user_idx').on(table.userId),
+    statusIdx: index('export_jobs_status_idx').on(table.status),
+    createdIdx: index('export_jobs_created_idx').on(table.createdAt),
+  })
+);
+
+export const exportAssets = pgTable(
+  'export_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    jobId: uuid('job_id')
+      .notNull()
+      // Avoid hard FK to keep this schema file self-contained
+      ,
+    type: exportAssetTypeEnum('type').notNull(),
+    variant: text('variant').notNull(), // e.g., "9:16-1080x1920" or "title.txt"
+    storagePath: text('storage_path').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    checksum: text('checksum'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    jobIdx: index('export_assets_job_idx').on(table.jobId),
+  })
+);
+
+// Optional saved presets for user convenience (MVP: Keep simple)
+export const exportPresets = pgTable(
+  'export_presets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    formats: jsonb('formats').$type<
+      Array<{
+        ratio: '9:16' | '1:1' | '16:9';
+        resolution: string;
+        bitrate?: string;
+        fps?: number;
+      }>
+    >().notNull(),
+    options: jsonb('options').$type<{
+      generateThumbnails?: boolean;
+      thumbnailTimecode?: string;
+      outputNaming?: string;
+    }>(),
+    brandKitId: uuid('brand_kit_id'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => ({
+    presetUserIdx: index('export_presets_user_idx').on(table.userId),
+  })
+);
+```
+
+#### API Endpoints / Server Actions
+
+```typescript
+// /actions/exports.ts
+'use server';
+
+import { auth } from '@clerk/nextjs';
+import { z } from 'zod';
+import { db } from '@/db';
+import { exportJobs, exportAssets } from '@/db/schema/exports';
+import { eq, and, desc } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
+import { getUserActiveSubscription } from '@/lib/payments/whop'; // implement wrapper around Whop SDK
+import { createSupabaseAdminClient } from '@/lib/supabase/admin'; // service role client for signed URLs (read-only here)
+
+const createExportJobSchema = z.object({
+  projectId: z.string().uuid().optional(),
+  contentId: z.string().uuid().optional(),
+  sourceVideoPath: z.string().min(1), // Supabase Storage key to master/finalized video
+  brandKitId: z.string().uuid().optional(),
+  formats: z.array(z.object({
+    ratio: z.enum(['9:16', '1:1', '16:9']),
+    resolution: z.string().regex(/^\d+x\d+$/),
+    bitrate: z.string().optional(),
+    fps: z.number().int().min(12).max(120).optional(),
+  })).min(1),
+  options: z.object({
+    generateThumbnails: z.boolean().optional(),
+    thumbnailTimecode: z.string().optional(),
+    metadataOverrides: z.object({
+      title: z.string().optional(),
+      description: z.string().optional(),
       hashtags: z.array(z.string()).optional(),
     }).optional(),
     outputNaming: z.string().optional(),

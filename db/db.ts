@@ -1,13 +1,24 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { 
-  exportJobs, 
-  exportAssets, 
-  brandKits, 
-  projects, 
-  content 
+import {
+  exportJobs,
+  exportAssets,
+  brandKits,
+  projects,
+  content
 } from "./schema/exports-schema";
 import { profilesTable } from "./schema/profiles-schema";
+import {
+  aiVideoProjects,
+  aiGenerationJobs,
+  aiAssets,
+  aiRegenerationRequests
+} from "./schema/ai-video";
+import {
+  trendingVideos,
+  remixJobs,
+  trendingFetchRuns
+} from "./schema/trending-remix";
 
 // Define the schema properly
 const schema = { 
@@ -16,7 +27,16 @@ const schema = {
   brandKits,
   projects,
   content,
-  profiles: profilesTable
+  profiles: profilesTable,
+  // AI Video Creation
+  aiVideoProjects,
+  aiGenerationJobs,
+  aiAssets,
+  aiRegenerationRequests,
+  // Trending Remix
+  trendingVideos,
+  remixJobs,
+  trendingFetchRuns
 };
 
 // Add connection options with improved timeout and retry settings for Vercel environment

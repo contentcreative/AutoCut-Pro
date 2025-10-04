@@ -5,7 +5,7 @@
  */
 "use client";
 
-import { Home, Settings, Database, Target, Users, Sparkles, CreditCard, Video } from "lucide-react";
+import { Home, Settings, Database, Target, Users, Sparkles, CreditCard, Video, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -40,14 +40,16 @@ export default function Sidebar({ profile, userEmail, whopMonthlyPlanId, whopYea
 
   // Plan IDs now come from props, not environment variables
   
-  const navItems = [
-    { href: "/dashboard", icon: <Home size={16} />, label: "Dashboard" },
-    { href: "/dashboard/exports", icon: <Video size={16} />, label: "Exports" },
-    { href: "/dashboard/data-source", icon: <Database size={16} />, label: "Source Videos" },
-    { href: "/dashboard/targets", icon: <Target size={16} />, label: "Templates" },
-    { href: "/dashboard/members", icon: <Users size={16} />, label: "Brand Kits" },
-    { href: "/dashboard/settings", icon: <Settings size={16} />, label: "Settings" },
-  ];
+    const navItems = [
+        { href: "/dashboard", icon: <Home size={16} />, label: "Dashboard" },
+        { href: "/dashboard/ai-create", icon: <Sparkles size={16} />, label: "AI Video Creation" },
+        { href: "/dashboard/trending-remix", icon: <TrendingUp size={16} />, label: "Trending Remix" },
+        { href: "/dashboard/exports", icon: <Video size={16} />, label: "Smart Exports" },
+        { href: "/dashboard/data-source", icon: <Database size={16} />, label: "Source Videos" },
+        { href: "/dashboard/targets", icon: <Target size={16} />, label: "Templates" },
+        { href: "/dashboard/members", icon: <Users size={16} />, label: "Brand Kits" },
+        { href: "/dashboard/settings", icon: <Settings size={16} />, label: "Settings" },
+    ];
 
   // Handle navigation item click
   const handleNavItemClick = (e: React.MouseEvent, href: string) => {
