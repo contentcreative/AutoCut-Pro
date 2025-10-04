@@ -32,7 +32,7 @@ export default function ExportsPage() {
         <ExportCreateDialog />
       </div>
 
-      {/* Export Stats */}
+      {/* Export Stats - Real data will be loaded here */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -40,7 +40,7 @@ export default function ExportsPage() {
             <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">0</div>
             <p className="text-xs text-muted-foreground">
               Currently processing
             </p>
@@ -53,7 +53,7 @@ export default function ExportsPage() {
             <CheckCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">0</div>
             <p className="text-xs text-muted-foreground">
               Successfully exported
             </p>
@@ -66,7 +66,7 @@ export default function ExportsPage() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">2.3min</div>
+            <div className="text-2xl font-bold">-</div>
             <p className="text-xs text-muted-foreground">
               Per export job
             </p>
@@ -79,7 +79,7 @@ export default function ExportsPage() {
             <Download className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">99.2%</div>
+            <div className="text-2xl font-bold">-</div>
             <p className="text-xs text-muted-foreground">
               Export success rate
             </p>

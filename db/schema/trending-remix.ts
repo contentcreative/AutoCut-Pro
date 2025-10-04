@@ -3,13 +3,13 @@ import {
   pgTable, uuid, text, timestamp, integer, bigint, numeric, jsonb, pgEnum, index, uniqueIndex, boolean
 } from 'drizzle-orm/pg-core';
 
-export const platformEnum = pgEnum('platform', ['youtube', 'tiktok', 'instagram']);
-export const remixJobStatusEnum = pgEnum('remix_job_status', ['queued','processing','completed','failed','cancelled']);
-export const remixJobStepEnum = pgEnum('remix_job_step', ['init','fetch_transcript','rewrite_script','tts','assemble','upload','done']);
+export const trendingPlatformEnum = pgEnum('trending_video_platform', ['youtube', 'tiktok', 'instagram']);
+export const trendingRemixJobStatusEnum = pgEnum('trending_remix_job_status', ['queued','processing','completed','failed','cancelled']);
+export const trendingRemixJobStepEnum = pgEnum('trending_remix_job_step', ['init','fetch_transcript','rewrite_script','tts','assemble','upload','done']);
 
 export const trendingVideos = pgTable('trending_videos', {
   id: uuid('id').primaryKey().defaultRandom(),
-  platform: platformEnum('platform').notNull(),
+  platform: trendingPlatformEnum('platform').notNull(),
   sourceVideoId: text('source_video_id').notNull(),
   niche: text('niche').notNull(),
   title: text('title').notNull(),
@@ -38,8 +38,8 @@ export const remixJobs = pgTable('remix_jobs', {
   userId: text('user_id').notNull(), // Clerk user id
   trendingVideoId: uuid('trending_video_id').references(() => trendingVideos.id, { onDelete: 'set null' }),
   niche: text('niche'),
-  status: remixJobStatusEnum('status').notNull().default('queued'),
-  step: remixJobStepEnum('step').default('init'),
+  status: trendingRemixJobStatusEnum('status').notNull().default('queued'),
+  step: trendingRemixJobStepEnum('step').default('init'),
   options: jsonb('options'), // {voiceModel, aspectRatio, targetDuration, stylePreset, language, musicPack, ...}
   rewrittenScript: text('rewritten_script'),
   transcriptUrl: text('transcript_url'), // Supabase file URL for original transcript
@@ -65,7 +65,7 @@ export const remixJobs = pgTable('remix_jobs', {
 
 export const trendingFetchRuns = pgTable('trending_fetch_runs', {
   id: uuid('id').primaryKey().defaultRandom(),
-  platform: platformEnum('platform').notNull(),
+  platform: trendingPlatformEnum('platform').notNull(),
   niche: text('niche').notNull(),
   totalFound: integer('total_found').default(0),
   totalInserted: integer('total_inserted').default(0),

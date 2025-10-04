@@ -30,27 +30,104 @@ export async function createAIVideoProject(input: z.infer<typeof CreateProjectSc
   // await verifyActiveSubscription(userId);
 
   const data = CreateProjectSchema.parse(input);
+  
+  // Create the project with proper schema mapping
   const [project] = await db.insert(aiVideoProjects).values({
     userId,
     topic: data.topic,
     status: 'queued',
-    ...data.settings,
+    ttsProvider: data.settings.ttsProvider || 'openai',
+    voiceStyle: data.settings.voiceStyle || 'narration_female',
+    captionsTheme: data.settings.captionsTheme || 'bold-yellow',
+    aspectRatio: data.settings.aspectRatio || '9:16',
+    targetDurationSec: data.settings.targetDurationSec || 30,
+    language: data.settings.language || 'en',
+    seed: data.settings.seed,
   }).returning();
 
   const [job] = await db.insert(aiGenerationJobs).values({
     projectId: project.id,
     status: 'queued',
     currentStep: 'queued',
+    progressPct: 0,
   }).returning();
 
-  // TODO: Kick off Express worker when ready
-  // await csFetch(`${process.env.WORKER_BASE_URL}/video/generate`, {
-  //   method: 'POST',
-  //   headers: { 'x-api-key': process.env.WORKER_API_KEY! },
-  //   body: JSON.stringify({ jobId: job.id, projectId: project.id }),
-  // });
+  // Kick off Express worker
+  try {
+    const response = await fetch(`${process.env.WORKER_BASE_URL || 'http://localhost:3030'}/video/generate`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.WORKER_API_KEY || 'dev-secret'
+      },
+      body: JSON.stringify({ 
+        jobId: job.id, 
+        projectId: project.id,
+        inputTopic: data.topic,
+        settings: data.settings
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Worker request failed:', response.status, response.statusText);
+      // Don't throw error - job is still created, just not processed yet
+    }
+  } catch (error) {
+    console.error('Failed to start worker:', error);
+    // Don't throw error - job is still created, just not processed yet
+  }
 
   return { projectId: project.id, jobId: job.id };
+}
+
+export async function listUserProjects() {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+
+  try {
+    const userProjects = await db
+      .select({
+        id: aiVideoProjects.id,
+        topic: aiVideoProjects.topic,
+        status: aiVideoProjects.status,
+        createdAt: aiVideoProjects.createdAt,
+        settings: {
+          aspectRatio: aiVideoProjects.aspectRatio,
+          voiceStyle: aiVideoProjects.voiceStyle,
+          captionsTheme: aiVideoProjects.captionsTheme,
+          targetDurationSec: aiVideoProjects.targetDurationSec,
+        },
+        videoUrl: aiAssets.publicUrl,
+        thumbnailUrl: aiAssets.publicUrl,
+        duration: aiVideoProjects.durationMs,
+      })
+      .from(aiVideoProjects)
+      .leftJoin(aiAssets, eq(aiAssets.projectId, aiVideoProjects.id))
+      .where(eq(aiVideoProjects.userId, userId))
+      .orderBy(aiVideoProjects.createdAt);
+
+    // Group by project to avoid duplicates from joins
+    const projectMap = new Map();
+    userProjects.forEach(project => {
+      if (!projectMap.has(project.id)) {
+        projectMap.set(project.id, {
+          id: project.id,
+          topic: project.topic,
+          status: project.status,
+          createdAt: project.createdAt,
+          settings: project.settings,
+          videoUrl: null,
+          thumbnailUrl: null,
+          duration: project.duration,
+        });
+      }
+    });
+
+    return Array.from(projectMap.values());
+  } catch (error) {
+    console.error('Error fetching user projects:', error);
+    return [];
+  }
 }
 
 const UpdateSettingsSchema = z.object({

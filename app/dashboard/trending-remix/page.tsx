@@ -4,7 +4,7 @@
  */
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,68 +35,37 @@ export default function TrendingRemixPage() {
     platform: 'youtube',
   });
   
-  // Mock trending videos data (in real app, this would come from server state)
-  const [trendingVideos] = useState([
-    {
-      id: "1",
-      title: "Top 5 Productivity Hacks for Remote Work",
-      creator: "Tech Insights",
-      platform: "YouTube",
-      views: "1.2M",
-      likes: "80K",
-      comments: "2.5K",
-      age: "2 days ago",
-      duration: "1:30",
-      viralityScore: 4.8,
-      thumbnail: "https://via.placeholder.com/150x84?text=Video1"
-    },
-    {
-      id: "2", 
-      title: "DIY Home Decor Ideas You'll Love",
-      creator: "Crafty Corner",
-      platform: "TikTok",
-      views: "980K",
-      likes: "120K",
-      comments: "4K",
-      age: "1 day ago",
-      duration: "0:45",
-      viralityScore: 4.5,
-      thumbnail: "https://via.placeholder.com/150x84?text=Video2"
-    },
-    {
-      id: "3",
-      title: "Healthy Meal Prep for Busy Weekdays",
-      creator: "Fit Foodie",
-      platform: "Instagram",
-      views: "750K",
-      likes: "95K",
-      comments: "3.1K",
-      age: "3 days ago",
-      duration: "1:00",
-      viralityScore: 4.2,
-      thumbnail: "https://via.placeholder.com/150x84?text=Video3"
-    },
-  ]);
+  // Real trending videos data - loaded from database
+  const [trendingVideos, setTrendingVideos] = useState<any[]>([]);
 
-  // Mock remix jobs data
-  const [remixJobs] = useState([
-    {
-      id: "job1",
-      trendingVideoTitle: "Top 5 Productivity Hacks for Remote Work",
-      status: "completed",
-      step: "done",
-      outputUrl: "#",
-      createdAt: "2023-10-26",
-    },
-    {
-      id: "job2",
-      trendingVideoTitle: "DIY Home Decor Ideas You'll Love",
-      status: "processing",
-      step: "assemble",
-      outputUrl: null,
-      createdAt: "2023-10-25",
-    },
-  ]);
+  // Real remix jobs data - loaded from database
+  const [remixJobs, setRemixJobs] = useState<any[]>([]);
+
+  // Load data on component mount
+  useEffect(() => {
+    loadTrendingVideos();
+    loadRemixJobs();
+  }, []);
+
+  const loadTrendingVideos = async () => {
+    try {
+      // TODO: Implement getTrendingVideos server action
+      // For now, we'll show a message that search is needed
+      console.log('Loading trending videos...');
+    } catch (error) {
+      console.error('Error loading trending videos:', error);
+    }
+  };
+
+  const loadRemixJobs = async () => {
+    try {
+      // TODO: Implement getUserRemixJobs server action
+      // For now, we'll show empty state
+      console.log('Loading remix jobs...');
+    } catch (error) {
+      console.error('Error loading remix jobs:', error);
+    }
+  };
 
   const handleSearchTrends = async () => {
     if (!searchForm.niche.trim()) {
@@ -113,6 +82,9 @@ export default function TrendingRemixPage() {
       });
       
       toast.success(`Found ${result.totalFound} trending videos, inserted ${result.totalInserted} new ones!`);
+      
+      // Reload trending videos after search
+      await loadTrendingVideos();
     } catch (error) {
       console.error('Search error:', error);
       toast.error('Failed to fetch trending content. Please try again.');
@@ -227,64 +199,88 @@ export default function TrendingRemixPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Video</TableHead>
-                <TableHead>Platform</TableHead>
-                <TableHead>Creator</TableHead>
-                <TableHead>Views</TableHead>
-                <TableHead>Likes</TableHead>
-                <TableHead>Age</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {trendingVideos.map((video) => (
-                <TableRow key={video.id}>
-                  <TableCell className="font-medium flex items-center gap-2">
-                    <Image src={video.thumbnail} alt={video.title} width={64} height={36} className="object-cover rounded" />
-                    {video.title}
-                  </TableCell>
-                  <TableCell>
-                    {video.platform === "YouTube" && <Youtube className="h-5 w-5 text-red-600" />}
-                    {video.platform === "TikTok" && <Music className="h-5 w-5 text-black" />}
-                    {video.platform === "Instagram" && <Instagram className="h-5 w-5 text-pink-600" />}
-                  </TableCell>
-                  <TableCell>{video.creator}</TableCell>
-                  <TableCell>{video.views}</TableCell>
-                  <TableCell>{video.likes}</TableCell>
-                  <TableCell>{video.age}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      {video.viralityScore} <Info className="h-3 w-3" />
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleRemix(video.id, video.title)}
-                      disabled={isRemixing === video.id}
-                    >
-                      {isRemixing === video.id ? (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                          Remixing...
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="mr-2 h-4 w-4" />
-                          Remix
-                        </>
-                      )}
-                    </Button>
-                  </TableCell>
+          {trendingVideos.length === 0 ? (
+            <div className="text-center py-8">
+              <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No trending videos yet</h3>
+              <p className="text-muted-foreground mb-4">
+                Search for trending content to discover viral videos in your niche
+              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
+                <div className="flex items-start gap-3">
+                  <Search className="h-5 w-5 text-blue-600 mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-blue-900 mb-1">Try searching for:</h4>
+                    <ul className="text-sm text-blue-700 space-y-1">
+                      <li>• "AI tools"</li>
+                      <li>• "Productivity tips"</li>
+                      <li>• "Fitness routines"</li>
+                      <li>• "Cooking hacks"</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Video</TableHead>
+                  <TableHead>Platform</TableHead>
+                  <TableHead>Creator</TableHead>
+                  <TableHead>Views</TableHead>
+                  <TableHead>Likes</TableHead>
+                  <TableHead>Age</TableHead>
+                  <TableHead>Score</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {trendingVideos.map((video) => (
+                  <TableRow key={video.id}>
+                    <TableCell className="font-medium flex items-center gap-2">
+                      <Image src={video.thumbnail} alt={video.title} width={64} height={36} className="object-cover rounded" />
+                      {video.title}
+                    </TableCell>
+                    <TableCell>
+                      {video.platform === "YouTube" && <Youtube className="h-5 w-5 text-red-600" />}
+                      {video.platform === "TikTok" && <Music className="h-5 w-5 text-black" />}
+                      {video.platform === "Instagram" && <Instagram className="h-5 w-5 text-pink-600" />}
+                    </TableCell>
+                    <TableCell>{video.creator}</TableCell>
+                    <TableCell>{video.views}</TableCell>
+                    <TableCell>{video.likes}</TableCell>
+                    <TableCell>{video.age}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="flex items-center gap-1">
+                        {video.viralityScore} <Info className="h-3 w-3" />
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleRemix(video.id, video.title)}
+                        disabled={isRemixing === video.id}
+                      >
+                        {isRemixing === video.id ? (
+                          <>
+                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                            Remixing...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="mr-2 h-4 w-4" />
+                            Remix
+                          </>
+                        )}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -297,46 +293,56 @@ export default function TrendingRemixPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Original Video</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Step</TableHead>
-                <TableHead>Created At</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {remixJobs.map((job) => (
-                <TableRow key={job.id}>
-                  <TableCell className="font-medium">{job.trendingVideoTitle}</TableCell>
-                  <TableCell>
-                    <Badge variant={job.status === "completed" ? "default" : "secondary"}>
-                      {job.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{job.step}</TableCell>
-                  <TableCell>{job.createdAt}</TableCell>
-                  <TableCell className="text-right">
-                    {job.status === "completed" ? (
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={job.outputUrl!} download>
-                          <Download className="mr-2 h-4 w-4" />
-                          Download
-                        </a>
-                      </Button>
-                    ) : (
-                      <Button variant="outline" size="sm" disabled>
-                        <Play className="mr-2 h-4 w-4" />
-                        Preview
-                      </Button>
-                    )}
-                  </TableCell>
+          {remixJobs.length === 0 ? (
+            <div className="text-center py-8">
+              <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No remix jobs yet</h3>
+              <p className="text-muted-foreground">
+                Create your first remix by searching for trending videos above
+              </p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Original Video</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Step</TableHead>
+                  <TableHead>Created At</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {remixJobs.map((job) => (
+                  <TableRow key={job.id}>
+                    <TableCell className="font-medium">{job.trendingVideoTitle}</TableCell>
+                    <TableCell>
+                      <Badge variant={job.status === "completed" ? "default" : "secondary"}>
+                        {job.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{job.step}</TableCell>
+                    <TableCell>{job.createdAt}</TableCell>
+                    <TableCell className="text-right">
+                      {job.status === "completed" ? (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={job.outputUrl!} download>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download
+                          </a>
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" disabled>
+                          <Play className="mr-2 h-4 w-4" />
+                          Preview
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </main>

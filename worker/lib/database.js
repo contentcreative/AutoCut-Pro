@@ -1,19 +1,23 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Load environment variables dynamically
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase configuration');
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Missing Supabase configuration');
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
 }
-
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 /**
  * Update job status and progress
  */
 async function updateJobStatus(jobId, status, progress, currentStep) {
   try {
+    const supabase = getSupabaseClient();
     const { error } = await supabase
       .from('ai_generation_jobs')
       .update({
@@ -41,6 +45,7 @@ async function updateJobStatus(jobId, status, progress, currentStep) {
  */
 async function getProject(projectId) {
   try {
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('ai_video_projects')
       .select('*')
@@ -64,6 +69,7 @@ async function getProject(projectId) {
  */
 async function createAsset(projectId, type, metadata = {}) {
   try {
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from('ai_assets')
       .insert({
@@ -93,6 +99,7 @@ async function createAsset(projectId, type, metadata = {}) {
  */
 async function uploadToStorage(bucket, path, file) {
   try {
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase.storage
       .from(bucket)
       .upload(path, file, {
@@ -117,6 +124,7 @@ async function uploadToStorage(bucket, path, file) {
  */
 async function getSignedUrl(bucket, path, expiresIn = 3600) {
   try {
+    const supabase = getSupabaseClient();
     const { data, error } = await supabase.storage
       .from(bucket)
       .createSignedUrl(path, expiresIn);

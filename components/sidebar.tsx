@@ -5,7 +5,7 @@
  */
 "use client";
 
-import { Home, Settings, Database, Target, Users, Sparkles, CreditCard, Video, TrendingUp } from "lucide-react";
+import { Home, Settings, Database, Target, Users, Sparkles, CreditCard, Video, TrendingUp, FolderOpen } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
@@ -42,6 +42,7 @@ export default function Sidebar({ profile, userEmail, whopMonthlyPlanId, whopYea
   
     const navItems = [
         { href: "/dashboard", icon: <Home size={16} />, label: "Dashboard" },
+        { href: "/dashboard/projects", icon: <FolderOpen size={16} />, label: "My Projects" },
         { href: "/dashboard/ai-create", icon: <Sparkles size={16} />, label: "AI Video Creation" },
         { href: "/dashboard/trending-remix", icon: <TrendingUp size={16} />, label: "Trending Remix" },
         { href: "/dashboard/exports", icon: <Video size={16} />, label: "Smart Exports" },

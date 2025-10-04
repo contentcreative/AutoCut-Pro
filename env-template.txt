@@ -95,7 +95,7 @@ EXPORT_MAX_CONCURRENT="2"
 WORKER_PORT="3030"
 
 # Worker authentication secret (for API communication between Next.js and worker)
-WORKER_AUTH_SECRET="[YOUR-WORKER-SECRET-KEY]"
+WORKER_API_KEY="[YOUR-WORKER-API-KEY]"
 
 # Webhook secret for worker callbacks
 WORKER_WEBHOOK_SECRET="[YOUR-WEBHOOK-SECRET]"

@@ -4,7 +4,7 @@
  */
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,8 +29,10 @@ import {
 } from "lucide-react";
 import { createAIVideoProject } from "@/actions/ai-video-actions";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 
 export default function AICreatePage() {
+  const router = useRouter();
   const [isGenerating, setIsGenerating] = useState(false);
   const [formData, setFormData] = useState({
     topic: '',
@@ -41,6 +43,11 @@ export default function AICreatePage() {
     generateThumbnails: true,
   });
 
+  // Reset generating state on component mount (in case of page refresh)
+  useEffect(() => {
+    setIsGenerating(false);
+  }, []);
+
   const handleGenerate = async () => {
     if (!formData.topic.trim()) {
       toast.error('Please enter a topic for your video');
@@ -48,7 +55,9 @@ export default function AICreatePage() {
     }
 
     setIsGenerating(true);
+    
     try {
+      console.log('🚀 Starting AI video generation...');
       const result = await createAIVideoProject({
         topic: formData.topic,
         settings: {
@@ -59,7 +68,8 @@ export default function AICreatePage() {
         }
       });
       
-      toast.success('AI video generation started! Check your projects for progress.');
+      console.log('✅ AI video generation started:', result);
+      toast.success('AI video generation started! Redirecting to your projects...');
       
       // Reset form
       setFormData({
@@ -70,10 +80,17 @@ export default function AICreatePage() {
         captionsTheme: 'bold-yellow',
         generateThumbnails: true,
       });
+
+      // Redirect to projects page after a short delay
+      setTimeout(() => {
+        router.push('/dashboard/projects');
+      }, 1500);
+      
     } catch (error) {
-      console.error('Generation error:', error);
+      console.error('❌ Generation error:', error);
       toast.error('Failed to start video generation. Please try again.');
     } finally {
+      // Always reset the generating state
       setIsGenerating(false);
     }
   };
@@ -200,6 +217,20 @@ export default function AICreatePage() {
                 onCheckedChange={(checked) => setFormData(prev => ({ ...prev, generateThumbnails: !!checked }))}
               />
               <Label htmlFor="generateThumbnails">Generate Thumbnail</Label>
+            </div>
+
+            {/* Timing Expectations */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Clock className="h-5 w-5 text-blue-600 mt-0.5" />
+                <div>
+                  <h4 className="font-medium text-blue-900 mb-1">Generation Time</h4>
+                  <p className="text-sm text-blue-700">
+                    Your video will be ready in <strong>3-5 minutes</strong>. 
+                    You&apos;ll be redirected to your projects page to track progress.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <Button 
