@@ -1,21 +1,41 @@
-# AutoCut Pro Worker Environment Variables
+# AutoCut Pro Worker Environment Variables Template
+# Copy this file to .env and fill in your actual values
+# NEVER commit the .env file to version control
 
-# Server Configuration
-WORKER_PORT=3030
-WORKER_API_KEY=your-worker-api-key-here
+# ===========================================
+# SUPABASE CONFIGURATION
+# ===========================================
+NEXT_PUBLIC_SUPABASE_URL="your-supabase-url"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 
-# Supabase Configuration
-SUPABASE_URL=your-supabase-url
-SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+# ===========================================
+# AI VIDEO GENERATION APIs
+# ===========================================
+OPENAI_API_KEY="your-openai-api-key"
+ELEVENLABS_API_KEY="your-elevenlabs-api-key"
 
-# OpenAI Configuration
-OPENAI_API_KEY=your-openai-api-key
+# ===========================================
+# STOCK FOOTAGE & CONTENT APIS
+# ===========================================
+PEXELS_API_KEY="your-pexels-api-key"
+YOUTUBE_API_KEY="your-youtube-api-key"
 
-# ElevenLabs Configuration (optional)
-ELEVENLABS_API_KEY=your-elevenlabs-api-key
+# ===========================================
+# WORKER AUTHENTICATION
+# ===========================================
+WORKER_AUTH_SECRET="your-worker-auth-secret"
+WORKER_WEBHOOK_SECRET="your-worker-webhook-secret"
 
-# Stock Footage APIs
-PEXELS_API_KEY=your-pexels-api-key
+# ===========================================
+# WORKER CONFIGURATION
+# ===========================================
+WORKER_PORT="3030"
+EXPORT_MAX_CONCURRENT="2"
 
-# External Service URLs
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+# ===========================================
+# SECURITY NOTES
+# ===========================================
+# 1. This file should NEVER be committed to git
+# 2. Use different keys for development vs production
+# 3. Rotate keys regularly
+# 4. Monitor usage in service dashboards
