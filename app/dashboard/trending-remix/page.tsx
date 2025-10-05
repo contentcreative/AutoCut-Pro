@@ -23,7 +23,6 @@ import {
   Play, 
   Download, 
   Info,
-  Settings,
   Filter,
   ArrowUpDown,
   X
@@ -78,7 +77,6 @@ export default function TrendingRemixPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [isRemixing, setIsRemixing] = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   
   // Search state
   const [searchState, setSearchState] = useState<TrendingSearchState>({
@@ -382,14 +380,6 @@ export default function TrendingRemixPage() {
             <Zap className="h-3 w-3" />
             Viral Content
           </Badge>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
-          >
-            <Settings className="h-4 w-4 mr-1" />
-            {showAdvancedSearch ? 'Simple' : 'Advanced'}
-          </Button>
         </div>
       </div>
 
@@ -463,13 +453,11 @@ export default function TrendingRemixPage() {
           </div>
           
           {/* Advanced Filters Panel */}
-          {showAdvancedSearch && (
-            <AdvancedFiltersPanel
-              filters={searchState.advancedFilters}
-              onFiltersChange={updateAdvancedFilters}
-              onClearFilters={clearAllFilters}
-            />
-          )}
+          <AdvancedFiltersPanel
+            filters={searchState.advancedFilters}
+            onFiltersChange={updateAdvancedFilters}
+            onClearFilters={clearAllFilters}
+          />
           
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
