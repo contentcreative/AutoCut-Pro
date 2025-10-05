@@ -67,11 +67,8 @@ export function SearchSuggestions({ query, onSuggestionSelect, open, onOpenChang
   return (
     <div className="relative">
       {children}
-      <Popover open={open && (suggestions.length > 0 || loading)} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <div className="absolute inset-0 pointer-events-none" />
-        </PopoverTrigger>
-        <PopoverContent className="w-full p-0" align="start" side="bottom">
+      {open && (suggestions.length > 0 || loading) && (
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-background border border-border rounded-md shadow-lg max-h-60 overflow-y-auto">
           <div className="py-2">
             {loading ? (
               <div className="px-4 py-2 text-sm text-muted-foreground">
@@ -91,11 +88,18 @@ export function SearchSuggestions({ query, onSuggestionSelect, open, onOpenChang
                     {suggestions.slice(0, 5).map((suggestion) => (
                       <button
                         key={suggestion.text}
-                        onClick={() => handleSuggestionClick(suggestion)}
-                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSuggestionClick(suggestion);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                       >
                         {getSuggestionIcon(suggestion.type)}
-                        <span className="flex-1 text-left">{suggestion.text}</span>
+                        <span className="flex-1">{suggestion.text}</span>
                         {getSuggestionBadge(suggestion)}
                       </button>
                     ))}
@@ -110,11 +114,18 @@ export function SearchSuggestions({ query, onSuggestionSelect, open, onOpenChang
                     {suggestions.map((suggestion) => (
                       <button
                         key={suggestion.text}
-                        onClick={() => handleSuggestionClick(suggestion)}
-                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleSuggestionClick(suggestion);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
                       >
                         {getSuggestionIcon(suggestion.type)}
-                        <span className="flex-1 text-left">{suggestion.text}</span>
+                        <span className="flex-1">{suggestion.text}</span>
                         {getSuggestionBadge(suggestion)}
                       </button>
                     ))}
@@ -123,8 +134,8 @@ export function SearchSuggestions({ query, onSuggestionSelect, open, onOpenChang
               </>
             )}
           </div>
-        </PopoverContent>
-      </Popover>
+        </div>
+      )}
     </div>
   );
 }

@@ -277,6 +277,21 @@ export default function TrendingRemixPage() {
     setShowSuggestions(false);
   };
 
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-search-suggestions]')) {
+        setShowSuggestions(false);
+      }
+    };
+
+    if (showSuggestions) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showSuggestions]);
+
   const handlePresetSelect = (preset: any) => {
     updateBasicSearch({ 
       niche: preset.niche,
@@ -374,7 +389,7 @@ export default function TrendingRemixPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label htmlFor="niche" className="text-sm font-medium">Niche / Topic</label>
-              <div className="relative">
+              <div className="relative" data-search-suggestions>
                 <SearchSuggestions
                   query={searchState.basicSearch.niche}
                   onSuggestionSelect={handleSuggestionSelect}
@@ -387,12 +402,16 @@ export default function TrendingRemixPage() {
                     value={searchState.basicSearch.niche}
                     onChange={(e) => {
                       updateBasicSearch({ niche: e.target.value });
+                      // Only show suggestions when typing, not when clearing
                       setShowSuggestions(e.target.value.length > 0);
                     }}
-                    onFocus={() => setShowSuggestions(true)}
+                    onFocus={() => {
+                      // Only show suggestions if there's content or when first focusing
+                      setShowSuggestions(searchState.basicSearch.niche.length > 0 || true);
+                    }}
                     onBlur={() => {
                       // Delay hiding suggestions to allow clicking on them
-                      setTimeout(() => setShowSuggestions(false), 200);
+                      setTimeout(() => setShowSuggestions(false), 150);
                     }}
                     className="pr-8"
                   />
