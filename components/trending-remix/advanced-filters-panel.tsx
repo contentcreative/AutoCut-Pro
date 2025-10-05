@@ -288,9 +288,9 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
                 <div>
                   <Label className="text-sm">Video Language (Captions)</Label>
                   <Select
-                    value={filters.languageFilters.videoLanguages[0] || ''}
+                    value={filters.languageFilters.videoLanguages[0] || 'any'}
                     onValueChange={(value) => {
-                      if (value) {
+                      if (value && value !== 'any') {
                         updateLanguageFilters('videoLanguages', [value]);
                       } else {
                         updateLanguageFilters('videoLanguages', []);
@@ -301,7 +301,7 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
                       <SelectValue placeholder="Select video language" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Any language</SelectItem>
+                      <SelectItem value="any">Any language</SelectItem>
                       <SelectItem value="en">English</SelectItem>
                       <SelectItem value="es">Spanish</SelectItem>
                       <SelectItem value="fr">French</SelectItem>
@@ -328,9 +328,9 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
                 <div>
                   <Label className="text-sm">Audio Language</Label>
                   <Select
-                    value={filters.languageFilters.audioLanguages[0] || ''}
+                    value={filters.languageFilters.audioLanguages[0] || 'any'}
                     onValueChange={(value) => {
-                      if (value) {
+                      if (value && value !== 'any') {
                         updateLanguageFilters('audioLanguages', [value]);
                       } else {
                         updateLanguageFilters('audioLanguages', []);
@@ -341,7 +341,7 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
                       <SelectValue placeholder="Select audio language" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Any language</SelectItem>
+                      <SelectItem value="any">Any language</SelectItem>
                       <SelectItem value="en">English</SelectItem>
                       <SelectItem value="es">Spanish</SelectItem>
                       <SelectItem value="fr">French</SelectItem>
