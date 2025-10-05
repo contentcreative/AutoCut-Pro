@@ -46,7 +46,10 @@ import { SearchPresets } from "@/components/trending-remix/search-presets";
 import { PaginationControls } from "@/components/trending-remix/pagination-controls";
 
 // Helper functions
-function formatNumber(num: number): string {
+function formatNumber(num: number | null | undefined): string {
+  if (num == null || isNaN(num)) {
+    return '0';
+  }
   if (num >= 1000000) {
     return `${(num / 1000000).toFixed(1)}M`;
   } else if (num >= 1000) {
@@ -168,16 +171,16 @@ export default function TrendingRemixPage() {
       
       // Format the data for the UI
       const formattedVideos = (result.videos || []).map((video: any) => ({
-        id: video.id,
-        title: video.title,
+        id: video.id || 'unknown',
+        title: video.title || 'Untitled',
         platform: video.platform === 'youtube' ? 'YouTube' : video.platform === 'tiktok' ? 'TikTok' : 'Instagram',
-        thumbnail: video.thumbnailUrl || 'https://via.placeholder.com/320x180',
-        creator: video.creatorHandle || 'Unknown',
-        views: formatNumber(video.viewsCount),
-        likes: formatNumber(video.likesCount),
-        age: formatAge(video.publishedAt),
-        viralityScore: Number(video.viralityScore),
-        scoreBreakdown: video.scoreBreakdown,
+        thumbnail: video.thumbnailUrl || video.thumbnail_url || 'https://via.placeholder.com/320x180',
+        creator: video.creatorHandle || video.creator_handle || 'Unknown',
+        views: formatNumber(video.viewsCount || video.views_count),
+        likes: formatNumber(video.likesCount || video.likes_count),
+        age: formatAge(video.publishedAt || video.published_at),
+        viralityScore: Number(video.viralityScore || video.virality_score || 0),
+        scoreBreakdown: video.scoreBreakdown || video.score_breakdown || {},
       }));
       
       console.log('🎨 Formatted videos:', formattedVideos.length);
