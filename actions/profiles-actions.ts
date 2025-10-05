@@ -1,123 +1,86 @@
-"use server";
+﻿'use server';
 
-import { createProfile, deleteProfile, getAllProfiles, getProfileByUserId, updateProfile, getUserPlanInfo } from "@/db/queries/profiles-queries";
-import { InsertProfile, SelectProfile } from "@/db/schema/profiles-schema";
-import { ActionResult } from "@/types/actions/actions-types";
-import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from '@clerk/nextjs/server';
+import { SelectProfile } from '@/db/schema';
 
-export async function createProfileAction(data: InsertProfile): Promise<ActionResult<SelectProfile>> {
-  try {
-    const newProfile = await createProfile(data);
-    revalidatePath("/");
-    return { isSuccess: true, message: "Profile created successfully", data: newProfile };
-  } catch (error) {
-    return { isSuccess: false, message: "Failed to create profile" };
-  }
+export interface ActionState<T> {
+  isSuccess: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
 }
 
-export async function getProfileByUserIdAction(userId: string): Promise<ActionResult<SelectProfile | null>> {
+export async function getProfileByUserIdAction(userId: string): Promise<ActionState<SelectProfile>> {
   try {
-    const profile = await getProfileByUserId(userId);
-    return { isSuccess: true, message: "Profile retrieved successfully", data: profile };
-  } catch (error) {
-    return { isSuccess: false, message: "Failed to get profiles" };
-  }
-}
-
-export async function getAllProfilesAction(): Promise<ActionResult<SelectProfile[]>> {
-  try {
-    const profiles = await getAllProfiles();
-    return { isSuccess: true, message: "Profiles retrieved successfully", data: profiles };
-  } catch (error) {
-    return { isSuccess: false, message: "Failed to get profiles" };
-  }
-}
-
-export async function updateProfileAction(userId: string, data: Partial<InsertProfile>): Promise<ActionResult<SelectProfile>> {
-  try {
-    const updatedProfile = await updateProfile(userId, data);
-    revalidatePath("/");
-    return { isSuccess: true, message: "Profile updated successfully", data: updatedProfile };
-  } catch (error) {
-    return { isSuccess: false, message: "Failed to update profile" };
-  }
-}
-
-export async function deleteProfileAction(userId: string): Promise<ActionResult<void>> {
-  try {
-    await deleteProfile(userId);
-    revalidatePath("/");
-    return { isSuccess: true, message: "Profile deleted successfully" };
-  } catch (error) {
-    return { isSuccess: false, message: "Failed to delete profile" };
-  }
-}
-
-/**
- * Check if the current user's payment has failed
- * This is used by the PaymentStatusAlert component
- * Efficient: Only returns the boolean flag, not the entire profile
- */
-export async function checkPaymentFailedAction(): Promise<{ paymentFailed: boolean }> {
-  try {
-    const { userId } = auth();
-    
-    if (!userId) {
-      return { paymentFailed: false };
-    }
-    
-    const profile = await getProfileByUserId(userId);
-    return { paymentFailed: profile?.status === "payment_failed" || false };
-  } catch (error) {
-    console.error("Error checking payment status:", error);
-    return { paymentFailed: false };
-  }
-}
-
-/**
- * Get the current user's plan information including membership type and duration
- * This is used to display subscription details in the UI
- */
-export async function getUserPlanInfoAction(): Promise<ActionResult<{
-  membership: string;
-  planDuration: string | null;
-  status: string | null;
-  usageCredits: number | null;
-  usedCredits: number | null;
-  billingCycleStart: Date | null;
-  billingCycleEnd: Date | null;
-  nextCreditRenewal: Date | null;
-} | null>> {
-  try {
-    const { userId } = auth();
-    
-    if (!userId) {
-      return { 
-        isSuccess: false, 
-        message: "User not authenticated" 
+    const { userId: authUserId } = auth();
+    if (!authUserId || authUserId !== userId) {
+      return {
+        isSuccess: false,
+        message: 'Unauthorized',
+        error: 'User ID mismatch'
       };
     }
-    
-    const planInfo = await getUserPlanInfo(userId);
-    
-    if (!planInfo) {
-      return { 
-        isSuccess: false, 
-        message: "No plan information found" 
-      };
-    }
-    
-    return { 
-      isSuccess: true, 
-      message: "Plan information retrieved successfully", 
-      data: planInfo 
+
+    // Mock profile for now
+    const mockProfile: SelectProfile = {
+      id: userId,
+      userId,
+      email: 'user@example.com',
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      subscriptionStatus: null,
+      membership: 'free',
+      paymentProvider: null,
+      whopUserId: null,
+      whopMembershipId: null,
+      status: 'active',
+      planDuration: null,
+      billingCycleStart: null,
+      billingCycleEnd: null,
+      nextCreditRenewal: null,
+      credits: null,
+      usageCredits: 5,
+      usedCredits: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    return {
+      isSuccess: true,
+      data: mockProfile,
+      message: 'Profile retrieved successfully'
     };
   } catch (error) {
-    console.error("Error getting user plan information:", error);
-    return { 
-      isSuccess: false, 
-      message: "Failed to get plan information" 
+    return {
+      isSuccess: false,
+      message: 'Failed to retrieve profile',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+export async function checkPaymentFailedAction(userId: string): Promise<ActionState<boolean>> {
+  try {
+    const { userId: authUserId } = auth();
+    if (!authUserId || authUserId !== userId) {
+      return {
+        isSuccess: false,
+        message: 'Unauthorized',
+        error: 'User ID mismatch'
+      };
+    }
+
+    // Mock payment check - always return false for now
+    return {
+      isSuccess: true,
+      data: false,
+      message: 'Payment status checked'
+    };
+  } catch (error) {
+    return {
+      isSuccess: false,
+      message: 'Failed to check payment status',
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
