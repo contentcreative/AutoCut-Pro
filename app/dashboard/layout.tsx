@@ -91,6 +91,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   // Mock profile for now
   const profile = {
+    id: userId, // Use userId as id for now
     userId,
     email: userEmail,
     membership: 'free' as const,
