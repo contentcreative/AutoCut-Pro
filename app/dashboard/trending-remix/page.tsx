@@ -258,8 +258,6 @@ export default function TrendingRemixPage() {
     console.log('📝 Current platform:', searchState.basicSearch.platform);
     console.log('📝 isSearching state:', isSearching);
     
-    // Simple test to ensure function is being called
-    alert('Search Trends button clicked! Check console for details.');
     
     if (!searchState.basicSearch.niche.trim()) {
       console.log('❌ No niche provided');

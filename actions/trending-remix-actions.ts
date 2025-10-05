@@ -21,7 +21,15 @@ export async function fetchAndUpsertTrending(input: unknown) {
   if (!userId) throw new Error('Unauthorized');
   const { niche, platforms, max } = FetchSchema.parse(input);
 
-  const run = await db.insert(trendingFetchRuns).values({ niche, platform: 'youtube' }).returning({ id: trendingFetchRuns.id });
+  // Create fetch runs for each platform
+  const fetchRuns = [];
+  for (const platform of platforms) {
+    const run = await db.insert(trendingFetchRuns).values({ 
+      niche, 
+      platform: platform as 'youtube' | 'tiktok' | 'instagram' 
+    }).returning({ id: trendingFetchRuns.id });
+    fetchRuns.push(run[0]);
+  }
 
   // Fetch from real APIs
   const results: any[] = [];
@@ -139,11 +147,14 @@ export async function fetchAndUpsertTrending(input: unknown) {
     }
   }
 
-  await db.update(trendingFetchRuns).set({
-    totalFound: results.length,
-    totalInserted: inserted,
-    completedAt: new Date(),
-  }).where(eq(trendingFetchRuns.id, run[0].id));
+  // Update all fetch runs with completion data
+  for (const run of fetchRuns) {
+    await db.update(trendingFetchRuns).set({
+      totalFound: results.length,
+      totalInserted: inserted,
+      completedAt: new Date(),
+    }).where(eq(trendingFetchRuns.id, run.id));
+  }
 
   return { totalFound: results.length, totalInserted: inserted };
 }
