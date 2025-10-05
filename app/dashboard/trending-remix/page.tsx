@@ -405,7 +405,7 @@ export default function TrendingRemixPage() {
       <div className="mb-6">
         <SearchPresets 
           onPresetSelect={handlePresetSelect}
-          onSaveCurrentAsPreset={() => toast.info('Save preset feature coming soon!')}
+          currentSearchState={searchState}
         />
       </div>
 
