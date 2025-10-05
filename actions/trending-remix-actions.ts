@@ -39,6 +39,14 @@ export async function fetchAndUpsertTrending(input: unknown) {
     if (platforms.includes('youtube')) {
       console.log(`🔍 Fetching YouTube trending videos for niche: "${niche}"`);
       const youtubeResults = await fetchYouTubeShortsTrending(niche, max);
+      console.log(`📺 YouTube API returned ${youtubeResults.length} videos`);
+      if (youtubeResults.length > 0) {
+        console.log('🎬 Sample YouTube video:', {
+          title: youtubeResults[0].title,
+          platform: youtubeResults[0].platform,
+          views: youtubeResults[0].viewsCount
+        });
+      }
       results.push(...youtubeResults);
     }
     
@@ -92,6 +100,8 @@ export async function fetchAndUpsertTrending(input: unknown) {
     results.push(...mockResults);
   }
 
+  console.log(`💾 Processing ${results.length} results for database insertion`);
+  
   for (const item of results) {
     const now = new Date();
     const ageHours = item.publishedAt ? Math.max(1, (now.getTime() - item.publishedAt.getTime()) / 36e5) : 24;
@@ -105,6 +115,8 @@ export async function fetchAndUpsertTrending(input: unknown) {
       ageHours,
       durationSec: item.durationSeconds ?? undefined,
     });
+
+    console.log(`🔄 Processing video: "${item.title}" (score: ${score})`);
 
     try {
       await db
@@ -142,8 +154,9 @@ export async function fetchAndUpsertTrending(input: unknown) {
           },
         });
       inserted++;
+      console.log(`✅ Successfully inserted/updated video: "${item.title}"`);
     } catch (e) {
-      console.error('Upsert trending error', e);
+      console.error(`❌ Failed to insert video: "${item.title}"`, e);
     }
   }
 
@@ -363,7 +376,9 @@ export async function getTrendingVideosAdvanced(input: unknown) {
   query = query.limit(limit).offset(offset);
   
   // Execute query
+  console.log(`🔍 Executing query with ${whereConditions.length} conditions`);
   const videos = await query;
+  console.log(`📺 Query returned ${videos.length} videos`);
   
   // Get total count for pagination
   let countQuery = db.select({ count: count() }).from(trendingVideos);
@@ -371,6 +386,7 @@ export async function getTrendingVideosAdvanced(input: unknown) {
     countQuery = countQuery.where(and(...whereConditions));
   }
   const [{ count: totalCount }] = await countQuery;
+  console.log(`📊 Total count: ${totalCount}`);
   
   return {
     videos,
@@ -387,20 +403,26 @@ export async function getTrendingVideos(niche?: string) {
   const { userId } = auth();
   if (!userId) throw new Error('Unauthorized');
   
+  console.log(`🔍 getTrendingVideos called with niche: "${niche || 'none'}"`);
+  
   if (niche) {
-    return await db
+    const videos = await db
       .select()
       .from(trendingVideos)
       .where(eq(trendingVideos.niche, niche))
       .orderBy(desc(trendingVideos.viralityScore))
       .limit(100);
+    console.log(`📺 Found ${videos.length} videos for niche "${niche}"`);
+    return videos;
   }
   
-  return await db
+  const videos = await db
     .select()
     .from(trendingVideos)
     .orderBy(desc(trendingVideos.viralityScore))
     .limit(100);
+  console.log(`📺 Found ${videos.length} total videos`);
+  return videos;
 }
 
 export async function getUserRemixJobs() {
