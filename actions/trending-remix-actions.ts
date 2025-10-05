@@ -3,7 +3,7 @@
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db/db';
 import { trendingVideos, remixJobs, trendingFetchRuns } from '@/db/schema';
-import { eq, and, desc, asc, gte, lte, like, or, count, sql } from 'drizzle-orm';
+import { eq, and, desc, asc, gte, lte, like, or, count, sql, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { fetchYouTubeShortsTrending } from '@/lib/integrations/youtube';
 import { AdvancedFilters, SortOption, SearchPreset, TrendingVideo } from '@/types/trending-remix';
@@ -270,7 +270,7 @@ export async function getTrendingVideosAdvanced(input: unknown) {
   }
   
   if (platforms && platforms.length > 0) {
-    whereConditions.push(sql`${trendingVideos.platform} = ANY(${platforms})`);
+    whereConditions.push(inArray(trendingVideos.platform, platforms));
   }
   
   // Date range filter
