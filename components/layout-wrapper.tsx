@@ -7,7 +7,6 @@
  */
 import { ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import Header from "@/components/header";
 
 interface LayoutWrapperProps {
   children: ReactNode;
@@ -21,7 +20,7 @@ export default function LayoutWrapper({ children }: LayoutWrapperProps) {
   
   return (
     <>
-      {!isDashboardRoute && <Header />}
+      {/* Header is now handled by individual pages (e.g., homepage has its own header) */}
       <main>
         {children}
       </main>
