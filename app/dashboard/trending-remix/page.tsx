@@ -25,7 +25,8 @@ import {
   Info,
   Settings,
   Filter,
-  ArrowUpDown
+  ArrowUpDown,
+  X
 } from "lucide-react";
 import { 
   fetchAndUpsertTrending, 
@@ -271,6 +272,11 @@ export default function TrendingRemixPage() {
     setShowSuggestions(false);
   };
 
+  const clearSearch = () => {
+    updateBasicSearch({ niche: '' });
+    setShowSuggestions(false);
+  };
+
   const handlePresetSelect = (preset: any) => {
     updateBasicSearch({ 
       niche: preset.niche,
@@ -368,23 +374,39 @@ export default function TrendingRemixPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label htmlFor="niche" className="text-sm font-medium">Niche / Topic</label>
-              <SearchSuggestions
-                query={searchState.basicSearch.niche}
-                onSuggestionSelect={handleSuggestionSelect}
-                open={showSuggestions}
-                onOpenChange={setShowSuggestions}
-              >
-                <Input 
-                  id="niche" 
-                  placeholder="e.g., 'AI tools', 'Fitness', 'Cooking'" 
-                  value={searchState.basicSearch.niche}
-                  onChange={(e) => {
-                    updateBasicSearch({ niche: e.target.value });
-                    setShowSuggestions(e.target.value.length > 0);
-                  }}
-                  onFocus={() => setShowSuggestions(true)}
-                />
-              </SearchSuggestions>
+              <div className="relative">
+                <SearchSuggestions
+                  query={searchState.basicSearch.niche}
+                  onSuggestionSelect={handleSuggestionSelect}
+                  open={showSuggestions}
+                  onOpenChange={setShowSuggestions}
+                >
+                  <Input 
+                    id="niche" 
+                    placeholder="e.g., 'AI tools', 'Fitness', 'Cooking'" 
+                    value={searchState.basicSearch.niche}
+                    onChange={(e) => {
+                      updateBasicSearch({ niche: e.target.value });
+                      setShowSuggestions(e.target.value.length > 0);
+                    }}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() => {
+                      // Delay hiding suggestions to allow clicking on them
+                      setTimeout(() => setShowSuggestions(false), 200);
+                    }}
+                    className="pr-8"
+                  />
+                </SearchSuggestions>
+                {searchState.basicSearch.niche && (
+                  <button
+                    onClick={clearSearch}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <label htmlFor="platform" className="text-sm font-medium">Platform</label>

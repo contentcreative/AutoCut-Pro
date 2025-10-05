@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, History, Star } from "lucide-react";
+import { TrendingUp, History, Star, Search } from "lucide-react";
 import { SearchSuggestion } from "@/types/trending-remix";
 import { getSearchSuggestions } from "@/actions/trending-remix-actions";
+import { cn } from "@/lib/utils";
 
 interface SearchSuggestionsProps {
   query: string;
@@ -65,56 +65,66 @@ export function SearchSuggestions({ query, onSuggestionSelect, open, onOpenChang
   };
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        {children}
-      </PopoverTrigger>
-      <PopoverContent className="w-[400px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search niches..." value={query} />
-          <CommandList>
+    <div className="relative">
+      {children}
+      <Popover open={open && (suggestions.length > 0 || loading)} onOpenChange={onOpenChange}>
+        <PopoverTrigger asChild>
+          <div className="absolute inset-0 pointer-events-none" />
+        </PopoverTrigger>
+        <PopoverContent className="w-full p-0" align="start" side="bottom">
+          <div className="py-2">
             {loading ? (
-              <CommandEmpty>Loading suggestions...</CommandEmpty>
+              <div className="px-4 py-2 text-sm text-muted-foreground">
+                Loading suggestions...
+              </div>
             ) : suggestions.length === 0 ? (
-              <CommandEmpty>No suggestions found.</CommandEmpty>
+              <div className="px-4 py-2 text-sm text-muted-foreground">
+                No suggestions found.
+              </div>
             ) : (
               <>
                 {query.length === 0 && (
-                  <CommandGroup heading="Trending Niches">
+                  <div>
+                    <div className="px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Trending Niches
+                    </div>
                     {suggestions.slice(0, 5).map((suggestion) => (
-                      <CommandItem
+                      <button
                         key={suggestion.text}
-                        onSelect={() => handleSuggestionClick(suggestion)}
-                        className="flex items-center gap-2"
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
                       >
                         {getSuggestionIcon(suggestion.type)}
-                        <span className="flex-1">{suggestion.text}</span>
+                        <span className="flex-1 text-left">{suggestion.text}</span>
                         {getSuggestionBadge(suggestion)}
-                      </CommandItem>
+                      </button>
                     ))}
-                  </CommandGroup>
+                  </div>
                 )}
                 
                 {query.length > 0 && (
-                  <CommandGroup heading="Suggestions">
+                  <div>
+                    <div className="px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Suggestions
+                    </div>
                     {suggestions.map((suggestion) => (
-                      <CommandItem
+                      <button
                         key={suggestion.text}
-                        onSelect={() => handleSuggestionClick(suggestion)}
-                        className="flex items-center gap-2"
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
                       >
                         {getSuggestionIcon(suggestion.type)}
-                        <span className="flex-1">{suggestion.text}</span>
+                        <span className="flex-1 text-left">{suggestion.text}</span>
                         {getSuggestionBadge(suggestion)}
-                      </CommandItem>
+                      </button>
                     ))}
-                  </CommandGroup>
+                  </div>
                 )}
               </>
             )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
