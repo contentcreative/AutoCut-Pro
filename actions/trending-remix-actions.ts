@@ -3,9 +3,10 @@
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db/db';
 import { trendingVideos, remixJobs, trendingFetchRuns } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, asc, gte, lte, like, or, count, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { fetchYouTubeShortsTrending } from '@/lib/integrations/youtube';
+import { AdvancedFilters, SortOption, SearchPreset, TrendingVideo } from '@/types/trending-remix';
 // TODO: Implement when billing is ready
 // import { validateWhopEntitlement } from '@/lib/payments/whop';
 
@@ -201,6 +202,157 @@ export async function createRemixJob(input: unknown) {
   return { jobId: job.id };
 }
 
+// Enhanced search schema for advanced filtering
+const AdvancedSearchSchema = z.object({
+  niche: z.string().optional(),
+  platforms: z.array(z.enum(['youtube','tiktok','instagram'])).optional(),
+  filters: z.object({
+    dateRange: z.object({
+      start: z.date().nullable(),
+      end: z.date().nullable(),
+    }).optional(),
+    viewCountRange: z.object({
+      min: z.number().nullable(),
+      max: z.number().nullable(),
+    }).optional(),
+    durationRange: z.object({
+      min: z.number().nullable(),
+      max: z.number().nullable(),
+    }).optional(),
+    engagementFilters: z.object({
+      minLikes: z.number().nullable(),
+      minComments: z.number().nullable(),
+      minShares: z.number().nullable(),
+    }).optional(),
+  }).optional(),
+  sortBy: z.object({
+    key: z.enum(['viralityScore', 'viewsCount', 'likesCount', 'commentsCount', 'sharesCount', 'publishedAt', 'durationSeconds']),
+    direction: z.enum(['asc', 'desc']),
+  }).optional(),
+  pagination: z.object({
+    page: z.number().min(1).default(1),
+    limit: z.number().min(1).max(200).default(50),
+  }).optional(),
+  advancedSearch: z.object({
+    keywords: z.array(z.string()).optional(),
+    excludeTerms: z.array(z.string()).optional(),
+    exactPhrase: z.string().optional(),
+    matchAll: z.boolean().optional(),
+  }).optional(),
+});
+
+export async function getTrendingVideosAdvanced(input: unknown) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  const { niche, platforms, filters, sortBy, pagination, advancedSearch } = AdvancedSearchSchema.parse(input);
+  
+  // Build where conditions
+  const whereConditions = [];
+  
+  if (niche) {
+    whereConditions.push(eq(trendingVideos.niche, niche));
+  }
+  
+  if (platforms && platforms.length > 0) {
+    whereConditions.push(sql`${trendingVideos.platform} = ANY(${platforms})`);
+  }
+  
+  // Date range filter
+  if (filters?.dateRange?.start) {
+    whereConditions.push(gte(trendingVideos.publishedAt, filters.dateRange.start));
+  }
+  if (filters?.dateRange?.end) {
+    whereConditions.push(lte(trendingVideos.publishedAt, filters.dateRange.end));
+  }
+  
+  // View count range filter
+  if (filters?.viewCountRange?.min !== null && filters?.viewCountRange?.min !== undefined) {
+    whereConditions.push(gte(trendingVideos.viewsCount, filters.viewCountRange.min));
+  }
+  if (filters?.viewCountRange?.max !== null && filters?.viewCountRange?.max !== undefined) {
+    whereConditions.push(lte(trendingVideos.viewsCount, filters.viewCountRange.max));
+  }
+  
+  // Duration range filter
+  if (filters?.durationRange?.min !== null && filters?.durationRange?.min !== undefined) {
+    whereConditions.push(gte(trendingVideos.durationSeconds, filters.durationRange.min));
+  }
+  if (filters?.durationRange?.max !== null && filters?.durationRange?.max !== undefined) {
+    whereConditions.push(lte(trendingVideos.durationSeconds, filters.durationRange.max));
+  }
+  
+  // Engagement filters
+  if (filters?.engagementFilters?.minLikes !== null && filters?.engagementFilters?.minLikes !== undefined) {
+    whereConditions.push(gte(trendingVideos.likesCount, filters.engagementFilters.minLikes));
+  }
+  if (filters?.engagementFilters?.minComments !== null && filters?.engagementFilters?.minComments !== undefined) {
+    whereConditions.push(gte(trendingVideos.commentsCount, filters.engagementFilters.minComments));
+  }
+  if (filters?.engagementFilters?.minShares !== null && filters?.engagementFilters?.minShares !== undefined) {
+    whereConditions.push(gte(trendingVideos.sharesCount, filters.engagementFilters.minShares));
+  }
+  
+  // Advanced search filters
+  if (advancedSearch?.keywords && advancedSearch.keywords.length > 0) {
+    const keywordConditions = advancedSearch.keywords.map(keyword => 
+      like(trendingVideos.title, `%${keyword}%`)
+    );
+    whereConditions.push(
+      advancedSearch.matchAll ? and(...keywordConditions) : or(...keywordConditions)
+    );
+  }
+  
+  if (advancedSearch?.excludeTerms && advancedSearch.excludeTerms.length > 0) {
+    const excludeConditions = advancedSearch.excludeTerms.map(term => 
+      sql`NOT ${trendingVideos.title} ILIKE ${`%${term}%`}`
+    );
+    whereConditions.push(and(...excludeConditions));
+  }
+  
+  if (advancedSearch?.exactPhrase) {
+    whereConditions.push(like(trendingVideos.title, `%${advancedSearch.exactPhrase}%`));
+  }
+  
+  // Build query
+  let query = db.select().from(trendingVideos);
+  
+  if (whereConditions.length > 0) {
+    query = query.where(and(...whereConditions));
+  }
+  
+  // Apply sorting
+  const sortColumn = trendingVideos[sortBy?.key || 'viralityScore'];
+  const sortDirection = sortBy?.direction === 'asc' ? asc : desc;
+  query = query.orderBy(sortDirection(sortColumn));
+  
+  // Apply pagination
+  const page = pagination?.page || 1;
+  const limit = pagination?.limit || 50;
+  const offset = (page - 1) * limit;
+  query = query.limit(limit).offset(offset);
+  
+  // Execute query
+  const videos = await query;
+  
+  // Get total count for pagination
+  let countQuery = db.select({ count: count() }).from(trendingVideos);
+  if (whereConditions.length > 0) {
+    countQuery = countQuery.where(and(...whereConditions));
+  }
+  const [{ count: totalCount }] = await countQuery;
+  
+  return {
+    videos,
+    pagination: {
+      page,
+      limit,
+      total: totalCount,
+      totalPages: Math.ceil(totalCount / limit),
+    },
+  };
+}
+
 export async function getTrendingVideos(niche?: string) {
   const { userId } = auth();
   if (!userId) throw new Error('Unauthorized');
@@ -241,6 +393,117 @@ export async function cancelRemixJob(jobId: string) {
       eq(remixJobs.userId, userId),
     ));
   return { ok: true };
+}
+
+// Search suggestions and trending niches
+export async function getSearchSuggestions(query?: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  // Get trending niches from database
+  const trendingNiches = await db
+    .select({ 
+      niche: trendingVideos.niche,
+      count: count(),
+    })
+    .from(trendingVideos)
+    .groupBy(trendingVideos.niche)
+    .orderBy(desc(count()))
+    .limit(10);
+  
+  const suggestions = trendingNiches.map(niche => ({
+    text: niche.niche,
+    type: 'trending' as const,
+    count: niche.count,
+  }));
+  
+  // If query provided, filter suggestions
+  if (query) {
+    return suggestions.filter(s => 
+      s.text.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+  
+  return suggestions;
+}
+
+// Search presets management
+export async function getSearchPresets() {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  // For now, return default presets
+  // TODO: Implement user-specific presets storage
+  const defaultPresets: SearchPreset[] = [
+    {
+      id: 'tech-trending',
+      name: 'Tech & AI',
+      niche: 'AI tools',
+      platforms: ['youtube'],
+      filters: {
+        dateRange: { start: null, end: null },
+        viewCountRange: { min: 100000, max: null },
+        durationRange: { min: 15, max: 90 },
+        engagementFilters: { minLikes: 1000, minComments: null, minShares: null },
+        platformSpecific: {
+          youtube: { duration: 'short' },
+          tiktok: { music: null, hashtags: [] },
+          instagram: { reels: true, hashtags: [] },
+        },
+      },
+      isDefault: true,
+      createdAt: new Date(),
+    },
+    {
+      id: 'fitness-trending',
+      name: 'Fitness & Health',
+      niche: 'fitness',
+      platforms: ['youtube', 'tiktok'],
+      filters: {
+        dateRange: { start: null, end: null },
+        viewCountRange: { min: 50000, max: null },
+        durationRange: { min: 30, max: 120 },
+        engagementFilters: { minLikes: 500, minComments: null, minShares: null },
+        platformSpecific: {
+          youtube: { duration: 'short' },
+          tiktok: { music: true, hashtags: ['fitness', 'workout'] },
+          instagram: { reels: true, hashtags: ['fitness'] },
+        },
+      },
+      isDefault: true,
+      createdAt: new Date(),
+    },
+    {
+      id: 'cooking-trending',
+      name: 'Cooking & Food',
+      niche: 'cooking',
+      platforms: ['youtube', 'instagram'],
+      filters: {
+        dateRange: { start: null, end: null },
+        viewCountRange: { min: 25000, max: null },
+        durationRange: { min: 20, max: 180 },
+        engagementFilters: { minLikes: 200, minComments: null, minShares: null },
+        platformSpecific: {
+          youtube: { duration: 'short' },
+          tiktok: { music: null, hashtags: [] },
+          instagram: { reels: true, hashtags: ['cooking', 'food'] },
+        },
+      },
+      isDefault: true,
+      createdAt: new Date(),
+    },
+  ];
+  
+  return defaultPresets;
+}
+
+export async function saveSearchPreset(preset: Omit<SearchPreset, 'id' | 'createdAt'>) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  // TODO: Implement preset storage in database
+  // For now, just return success
+  return { success: true, id: `preset_${Date.now()}` };
 }
 
 // Helper function for virality score calculation

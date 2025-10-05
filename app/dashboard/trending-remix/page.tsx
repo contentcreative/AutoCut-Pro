@@ -1,6 +1,6 @@
 /**
- * Trending Remix page
- * Discover trending content and create original faceless remixes
+ * Enhanced Trending Remix page
+ * Discover trending content with advanced filtering and create original faceless remixes
  */
 'use client';
 
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   TrendingUp, 
   Search, 
@@ -21,11 +22,26 @@ import {
   Zap, 
   Play, 
   Download, 
-  Info 
+  Info,
+  Settings,
+  Filter,
+  ArrowUpDown
 } from "lucide-react";
-import { fetchAndUpsertTrending, createRemixJob, getTrendingVideos, getUserRemixJobs } from "@/actions/trending-remix-actions";
+import { 
+  fetchAndUpsertTrending, 
+  createRemixJob, 
+  getTrendingVideosAdvanced, 
+  getUserRemixJobs 
+} from "@/actions/trending-remix-actions";
 import { toast } from "sonner";
 import Image from "next/image";
+import { AdvancedFilters, SortOption, TrendingSearchState } from "@/types/trending-remix";
+import { ViralityScoreTooltip } from "@/components/trending-remix/virality-score-tooltip";
+import { AdvancedFiltersPanel } from "@/components/trending-remix/advanced-filters-panel";
+import { SearchSuggestions } from "@/components/trending-remix/search-suggestions";
+import { SortControls } from "@/components/trending-remix/sort-controls";
+import { SearchPresets } from "@/components/trending-remix/search-presets";
+import { PaginationControls } from "@/components/trending-remix/pagination-controls";
 
 // Helper functions
 function formatNumber(num: number): string {
@@ -54,18 +70,54 @@ function formatAge(publishedAt: string | Date | null): string {
 }
 
 export default function TrendingRemixPage() {
+  // Enhanced state management
   const [isSearching, setIsSearching] = useState(false);
   const [isRemixing, setIsRemixing] = useState<string | null>(null);
-  const [searchForm, setSearchForm] = useState({
-    niche: '',
-    platform: 'youtube',
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  
+  // Search state
+  const [searchState, setSearchState] = useState<TrendingSearchState>({
+    basicSearch: {
+      niche: '',
+      platform: 'youtube',
+    },
+    advancedFilters: {
+      dateRange: { start: null, end: null },
+      viewCountRange: { min: null, max: null },
+      durationRange: { min: null, max: null },
+      engagementFilters: { minLikes: null, minComments: null, minShares: null },
+      platformSpecific: {
+        youtube: { duration: 'all' },
+        tiktok: { music: null, hashtags: [] },
+        instagram: { reels: null, hashtags: [] },
+      },
+    },
+    sortBy: {
+      key: 'viralityScore',
+      label: 'Virality Score',
+      direction: 'desc',
+    },
+    searchPresets: [],
+    searchHistory: [],
+    searchSuggestions: [],
+    advancedSearch: {
+      keywords: [],
+      excludeTerms: [],
+      exactPhrase: '',
+      matchAll: false,
+    },
+    pagination: {
+      page: 1,
+      limit: 50,
+      total: 0,
+    },
   });
   
-  // Real trending videos data - loaded from database
+  // Results data
   const [trendingVideos, setTrendingVideos] = useState<any[]>([]);
-
-  // Real remix jobs data - loaded from database
   const [remixJobs, setRemixJobs] = useState<any[]>([]);
+  const [totalResults, setTotalResults] = useState(0);
 
   // Load data on component mount
   useEffect(() => {
@@ -74,12 +126,26 @@ export default function TrendingRemixPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadTrendingVideos = async () => {
+  const loadTrendingVideos = async (useAdvanced = false) => {
     try {
-      const videos = await getTrendingVideos(searchForm.niche || undefined);
+      let result;
+      
+      if (useAdvanced) {
+        result = await getTrendingVideosAdvanced({
+          niche: searchState.basicSearch.niche || undefined,
+          platforms: [searchState.basicSearch.platform as 'youtube' | 'tiktok' | 'instagram'],
+          filters: searchState.advancedFilters,
+          sortBy: searchState.sortBy,
+          pagination: searchState.pagination,
+          advancedSearch: searchState.advancedSearch,
+        });
+      } else {
+        const videos = await getTrendingVideos(searchState.basicSearch.niche || undefined);
+        result = { videos, pagination: { page: 1, limit: 50, total: videos.length, totalPages: 1 } };
+      }
       
       // Format the data for the UI
-      const formattedVideos = videos.map((video: any) => ({
+      const formattedVideos = result.videos.map((video: any) => ({
         id: video.id,
         title: video.title,
         platform: video.platform === 'youtube' ? 'YouTube' : video.platform === 'tiktok' ? 'TikTok' : 'Instagram',
@@ -88,10 +154,12 @@ export default function TrendingRemixPage() {
         views: formatNumber(video.viewsCount),
         likes: formatNumber(video.likesCount),
         age: formatAge(video.publishedAt),
-        viralityScore: Number(video.viralityScore).toFixed(2),
+        viralityScore: Number(video.viralityScore),
+        scoreBreakdown: video.scoreBreakdown,
       }));
       
       setTrendingVideos(formattedVideos);
+      setTotalResults(result.pagination.total);
     } catch (error) {
       console.error('Error loading trending videos:', error);
       toast.error('Failed to load trending videos');
@@ -119,8 +187,49 @@ export default function TrendingRemixPage() {
     }
   };
 
+  // Enhanced handler functions
+  const updateSearchState = (updates: Partial<TrendingSearchState>) => {
+    setSearchState(prev => ({ ...prev, ...updates }));
+  };
+
+  const updateBasicSearch = (updates: Partial<typeof searchState.basicSearch>) => {
+    updateSearchState({
+      basicSearch: { ...searchState.basicSearch, ...updates }
+    });
+  };
+
+  const updateAdvancedFilters = (filters: AdvancedFilters) => {
+    updateSearchState({ advancedFilters: filters });
+  };
+
+  const updateSortBy = (sortBy: SortOption) => {
+    updateSearchState({ sortBy });
+  };
+
+  const updatePagination = (pagination: Partial<typeof searchState.pagination>) => {
+    updateSearchState({
+      pagination: { ...searchState.pagination, ...pagination }
+    });
+  };
+
+  const clearAllFilters = () => {
+    updateSearchState({
+      advancedFilters: {
+        dateRange: { start: null, end: null },
+        viewCountRange: { min: null, max: null },
+        durationRange: { min: null, max: null },
+        engagementFilters: { minLikes: null, minComments: null, minShares: null },
+        platformSpecific: {
+          youtube: { duration: 'all' },
+          tiktok: { music: null, hashtags: [] },
+          instagram: { reels: null, hashtags: [] },
+        },
+      }
+    });
+  };
+
   const handleSearchTrends = async () => {
-    if (!searchForm.niche.trim()) {
+    if (!searchState.basicSearch.niche.trim()) {
       toast.error('Please enter a niche or topic to search');
       return;
     }
@@ -128,21 +237,64 @@ export default function TrendingRemixPage() {
     setIsSearching(true);
     try {
       const result = await fetchAndUpsertTrending({
-        niche: searchForm.niche,
-        platforms: [searchForm.platform as 'youtube' | 'tiktok' | 'instagram'],
+        niche: searchState.basicSearch.niche,
+        platforms: [searchState.basicSearch.platform as 'youtube' | 'tiktok' | 'instagram'],
         max: 50,
       });
       
       toast.success(`Found ${result.totalFound} trending videos, inserted ${result.totalInserted} new ones!`);
       
-      // Reload trending videos after search
-      await loadTrendingVideos();
+      // Reload trending videos after search with current filters
+      await loadTrendingVideos(true);
     } catch (error) {
       console.error('Search error:', error);
       toast.error('Failed to fetch trending content. Please try again.');
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const handleAdvancedSearch = async () => {
+    setIsSearching(true);
+    try {
+      await loadTrendingVideos(true);
+    } catch (error) {
+      console.error('Advanced search error:', error);
+      toast.error('Failed to perform advanced search');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSuggestionSelect = (suggestion: string) => {
+    updateBasicSearch({ niche: suggestion });
+    setShowSuggestions(false);
+  };
+
+  const handlePresetSelect = (preset: any) => {
+    updateBasicSearch({ 
+      niche: preset.niche,
+      platform: preset.platforms[0] || 'youtube'
+    });
+    updateAdvancedFilters(preset.filters);
+  };
+
+  const handleSortChange = async (sortBy: SortOption) => {
+    updateSortBy(sortBy);
+    // Reload with new sort
+    setTimeout(() => loadTrendingVideos(true), 100);
+  };
+
+  const handlePageChange = async (page: number) => {
+    updatePagination({ page });
+    // Reload with new page
+    setTimeout(() => loadTrendingVideos(true), 100);
+  };
+
+  const handleItemsPerPageChange = async (limit: number) => {
+    updatePagination({ limit, page: 1 });
+    // Reload with new limit
+    setTimeout(() => loadTrendingVideos(true), 100);
   };
 
   const handleRemix = async (videoId: string, title: string) => {
@@ -177,39 +329,68 @@ export default function TrendingRemixPage() {
             Trending Remix
           </h1>
           <p className="text-muted-foreground mt-2">
-            Discover viral content and create your own faceless remixes.
+            Discover viral content with advanced filtering and create your own faceless remixes.
           </p>
         </div>
-        <Badge variant="secondary" className="flex items-center gap-1">
-          <Zap className="h-3 w-3" />
-          Viral Content
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="flex items-center gap-1">
+            <Zap className="h-3 w-3" />
+            Viral Content
+          </Badge>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            {showAdvancedSearch ? 'Simple' : 'Advanced'}
+          </Button>
+        </div>
       </div>
 
-      {/* Trend Discovery Filters */}
+      {/* Search Presets */}
+      <div className="mb-6">
+        <SearchPresets 
+          onPresetSelect={handlePresetSelect}
+          onSaveCurrentAsPreset={() => toast.info('Save preset feature coming soon!')}
+        />
+      </div>
+
+      {/* Enhanced Trend Discovery */}
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>Discover Trends</CardTitle>
           <CardDescription>
-            Find trending short-form videos by niche and platform.
+            Find trending short-form videos by niche and platform with advanced filtering options.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label htmlFor="niche" className="text-sm font-medium">Niche / Topic</label>
-              <Input 
-                id="niche" 
-                placeholder="e.g., 'AI tools', 'Fitness', 'Cooking'" 
-                value={searchForm.niche}
-                onChange={(e) => setSearchForm(prev => ({ ...prev, niche: e.target.value }))}
-              />
+              <SearchSuggestions
+                query={searchState.basicSearch.niche}
+                onSuggestionSelect={handleSuggestionSelect}
+                open={showSuggestions}
+                onOpenChange={setShowSuggestions}
+              >
+                <Input 
+                  id="niche" 
+                  placeholder="e.g., 'AI tools', 'Fitness', 'Cooking'" 
+                  value={searchState.basicSearch.niche}
+                  onChange={(e) => {
+                    updateBasicSearch({ niche: e.target.value });
+                    setShowSuggestions(e.target.value.length > 0);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                />
+              </SearchSuggestions>
             </div>
             <div className="space-y-2">
               <label htmlFor="platform" className="text-sm font-medium">Platform</label>
               <Select 
-                value={searchForm.platform} 
-                onValueChange={(value) => setSearchForm(prev => ({ ...prev, platform: value }))}
+                value={searchState.basicSearch.platform} 
+                onValueChange={(value) => updateBasicSearch({ platform: value })}
               >
                 <SelectTrigger id="platform">
                   <SelectValue placeholder="Select platform" />
@@ -222,41 +403,77 @@ export default function TrendingRemixPage() {
               </Select>
             </div>
           </div>
-          <Button 
-            onClick={handleSearchTrends}
-            disabled={isSearching}
-            className="w-full md:w-auto"
-          >
-            {isSearching ? (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                Searching...
-              </>
-            ) : (
-              <>
-                <Search className="mr-2 h-4 w-4" />
-                Search Trends
-              </>
-            )}
-          </Button>
+          
+          {/* Advanced Filters Panel */}
+          <AdvancedFiltersPanel
+            filters={searchState.advancedFilters}
+            onFiltersChange={updateAdvancedFilters}
+            onClearFilters={clearAllFilters}
+          />
+          
+          {/* Action Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <Button 
+              onClick={handleSearchTrends}
+              disabled={isSearching}
+              className="flex-1 md:flex-none"
+            >
+              {isSearching ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Searching...
+                </>
+              ) : (
+                <>
+                  <Search className="mr-2 h-4 w-4" />
+                  Search Trends
+                </>
+              )}
+            </Button>
+            
+            <Button 
+              variant="outline"
+              onClick={handleAdvancedSearch}
+              disabled={isSearching}
+            >
+              <Filter className="mr-2 h-4 w-4" />
+              Apply Filters
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Trending Videos Table */}
+      {/* Enhanced Trending Videos Table */}
       <Card className="mb-8">
         <CardHeader>
-          <CardTitle>Trending Videos</CardTitle>
-          <CardDescription>
-            Ranked by virality score. Click Remix to create your own version.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Trending Videos</CardTitle>
+              <CardDescription>
+                Ranked by virality score. Click Remix to create your own version.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <SortControls 
+                sortBy={searchState.sortBy}
+                onSortChange={handleSortChange}
+              />
+              <Badge variant="outline" className="text-sm">
+                {totalResults} results
+              </Badge>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {trendingVideos.length === 0 ? (
             <div className="text-center py-8">
               <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No trending videos yet</h3>
+              <h3 className="text-lg font-semibold mb-2">No trending videos found</h3>
               <p className="text-muted-foreground mb-4">
-                Search for trending content to discover viral videos in your niche
+                {searchState.basicSearch.niche ? 
+                  `No results found for "${searchState.basicSearch.niche}". Try adjusting your filters or search terms.` :
+                  'Search for trending content to discover viral videos in your niche'
+                }
               </p>
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md mx-auto">
                 <div className="flex items-start gap-3">
@@ -274,74 +491,103 @@ export default function TrendingRemixPage() {
               </div>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Video</TableHead>
-                  <TableHead>Platform</TableHead>
-                  <TableHead>Creator</TableHead>
-                  <TableHead>Views</TableHead>
-                  <TableHead>Likes</TableHead>
-                  <TableHead>Age</TableHead>
-                  <TableHead>Score</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trendingVideos.map((video) => (
-                  <TableRow key={video.id}>
-                    <TableCell className="font-medium flex items-center gap-2">
-                      <Image src={video.thumbnail} alt={video.title} width={64} height={36} className="object-cover rounded" />
-                      {video.title}
-                    </TableCell>
-                    <TableCell>
-                      {video.platform === "YouTube" && <Youtube className="h-5 w-5 text-red-600" />}
-                      {video.platform === "TikTok" && <Music className="h-5 w-5 text-black" />}
-                      {video.platform === "Instagram" && <Instagram className="h-5 w-5 text-pink-600" />}
-                    </TableCell>
-                    <TableCell>{video.creator}</TableCell>
-                    <TableCell>{video.views}</TableCell>
-                    <TableCell>{video.likes}</TableCell>
-                    <TableCell>{video.age}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="flex items-center gap-1">
-                        {video.viralityScore} <Info className="h-3 w-3" />
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => handleRemix(video.id, video.title)}
-                        disabled={isRemixing === video.id}
-                      >
-                        {isRemixing === video.id ? (
-                          <>
-                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                            Remixing...
-                          </>
-                        ) : (
-                          <>
-                            <Zap className="mr-2 h-4 w-4" />
-                            Remix
-                          </>
-                        )}
-                      </Button>
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Video</TableHead>
+                    <TableHead>Platform</TableHead>
+                    <TableHead>Creator</TableHead>
+                    <TableHead>Views</TableHead>
+                    <TableHead>Likes</TableHead>
+                    <TableHead>Age</TableHead>
+                    <TableHead>Score</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {trendingVideos.map((video) => (
+                    <TableRow key={video.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2 max-w-xs">
+                          <Image 
+                            src={video.thumbnail} 
+                            alt={video.title} 
+                            width={64} 
+                            height={36} 
+                            className="object-cover rounded flex-shrink-0" 
+                          />
+                          <span className="truncate" title={video.title}>
+                            {video.title}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {video.platform === "YouTube" && <Youtube className="h-5 w-5 text-red-600" />}
+                        {video.platform === "TikTok" && <Music className="h-5 w-5 text-black" />}
+                        {video.platform === "Instagram" && <Instagram className="h-5 w-5 text-pink-600" />}
+                      </TableCell>
+                      <TableCell className="max-w-24 truncate" title={video.creator}>
+                        {video.creator}
+                      </TableCell>
+                      <TableCell>{video.views}</TableCell>
+                      <TableCell>{video.likes}</TableCell>
+                      <TableCell>{video.age}</TableCell>
+                      <TableCell>
+                        <ViralityScoreTooltip 
+                          score={video.viralityScore}
+                          breakdown={video.scoreBreakdown}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleRemix(video.id, video.title)}
+                          disabled={isRemixing === video.id}
+                        >
+                          {isRemixing === video.id ? (
+                            <>
+                              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                              Remixing...
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="mr-2 h-4 w-4" />
+                              Remix
+                            </>
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              
+              {/* Pagination Controls */}
+              {totalResults > searchState.pagination.limit && (
+                <div className="mt-6">
+                  <PaginationControls
+                    currentPage={searchState.pagination.page}
+                    totalPages={Math.ceil(totalResults / searchState.pagination.limit)}
+                    totalItems={totalResults}
+                    itemsPerPage={searchState.pagination.limit}
+                    onPageChange={handlePageChange}
+                    onItemsPerPageChange={handleItemsPerPageChange}
+                  />
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
 
-      {/* Recent Remix Jobs */}
+      {/* Enhanced Remix Jobs */}
       <Card>
         <CardHeader>
           <CardTitle>Your Remix Jobs</CardTitle>
           <CardDescription>
-            Track the status of your trending video remixes.
+            Track the status of your trending video remixes with real-time updates.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -349,9 +595,23 @@ export default function TrendingRemixPage() {
             <div className="text-center py-8">
               <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No remix jobs yet</h3>
-              <p className="text-muted-foreground">
+              <p className="text-muted-foreground mb-4">
                 Create your first remix by searching for trending videos above
               </p>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 max-w-md mx-auto">
+                <div className="flex items-start gap-3">
+                  <Zap className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-green-900 mb-1">How it works:</h4>
+                    <ul className="text-sm text-green-700 space-y-1">
+                      <li>• Search for trending videos</li>
+                      <li>• Click "Remix" on any video</li>
+                      <li>• AI creates original version</li>
+                      <li>• Download when ready</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <Table>
@@ -367,21 +627,39 @@ export default function TrendingRemixPage() {
               <TableBody>
                 {remixJobs.map((job) => (
                   <TableRow key={job.id}>
-                    <TableCell className="font-medium">{job.trendingVideoTitle}</TableCell>
+                    <TableCell className="font-medium max-w-48 truncate" title={job.trendingVideoTitle}>
+                      {job.trendingVideoTitle}
+                    </TableCell>
                     <TableCell>
-                      <Badge variant={job.status === "completed" ? "default" : "secondary"}>
+                      <Badge 
+                        variant={
+                          job.status === "completed" ? "default" : 
+                          job.status === "failed" ? "destructive" :
+                          job.status === "processing" ? "secondary" :
+                          "outline"
+                        }
+                      >
                         {job.status}
                       </Badge>
                     </TableCell>
-                    <TableCell>{job.step}</TableCell>
-                    <TableCell>{job.createdAt}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {job.step}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {job.createdAt}
+                    </TableCell>
                     <TableCell className="text-right">
-                      {job.status === "completed" ? (
+                      {job.status === "completed" && job.outputUrl ? (
                         <Button variant="outline" size="sm" asChild>
-                          <a href={job.outputUrl!} download>
+                          <a href={job.outputUrl} download>
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </a>
+                        </Button>
+                      ) : job.status === "failed" ? (
+                        <Button variant="outline" size="sm" onClick={() => handleRemix(job.id, job.trendingVideoTitle)}>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Retry
                         </Button>
                       ) : (
                         <Button variant="outline" size="sm" disabled>
