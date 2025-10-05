@@ -32,6 +32,7 @@ import {
   fetchAndUpsertTrending, 
   createRemixJob, 
   getTrendingVideosAdvanced, 
+  getTrendingVideos,
   getUserRemixJobs 
 } from "@/actions/trending-remix-actions";
 import { toast } from "sonner";
@@ -129,10 +130,14 @@ export default function TrendingRemixPage() {
   }, []);
 
   const loadTrendingVideos = async (useAdvanced = false) => {
+    console.log('📊 Loading trending videos, useAdvanced:', useAdvanced);
+    console.log('🔍 Current niche:', searchState.basicSearch.niche);
+    
     try {
       let result;
       
       if (useAdvanced) {
+        console.log('🚀 Using advanced search...');
         result = await getTrendingVideosAdvanced({
           niche: searchState.basicSearch.niche || undefined,
           platforms: [searchState.basicSearch.platform as 'youtube' | 'tiktok' | 'instagram'],
@@ -142,12 +147,27 @@ export default function TrendingRemixPage() {
           advancedSearch: searchState.advancedSearch,
         });
       } else {
+        console.log('📋 Using basic search...');
         const videos = await getTrendingVideos(searchState.basicSearch.niche || undefined);
-        result = { videos, pagination: { page: 1, limit: 50, total: videos.length, totalPages: 1 } };
+        console.log('📺 Raw videos from DB:', videos?.length || 0);
+        result = { 
+          videos: videos || [], 
+          pagination: { 
+            page: 1, 
+            limit: 50, 
+            total: videos?.length || 0, 
+            totalPages: 1 
+          } 
+        };
       }
       
+      console.log('📊 Search result:', {
+        videoCount: result.videos?.length || 0,
+        total: result.pagination?.total || 0
+      });
+      
       // Format the data for the UI
-      const formattedVideos = result.videos.map((video: any) => ({
+      const formattedVideos = (result.videos || []).map((video: any) => ({
         id: video.id,
         title: video.title,
         platform: video.platform === 'youtube' ? 'YouTube' : video.platform === 'tiktok' ? 'TikTok' : 'Instagram',
@@ -160,11 +180,12 @@ export default function TrendingRemixPage() {
         scoreBreakdown: video.scoreBreakdown,
       }));
       
+      console.log('🎨 Formatted videos:', formattedVideos.length);
       setTrendingVideos(formattedVideos);
-      setTotalResults(result.pagination.total);
+      setTotalResults(result.pagination?.total || 0);
     } catch (error) {
-      console.error('Error loading trending videos:', error);
-      toast.error('Failed to load trending videos');
+      console.error('❌ Error loading trending videos:', error);
+      toast.error(`Failed to load trending videos: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -232,6 +253,9 @@ export default function TrendingRemixPage() {
   };
 
   const handleSearchTrends = async () => {
+    console.log('🔍 Search Trends button clicked');
+    console.log('📝 Current niche:', searchState.basicSearch.niche);
+    
     if (!searchState.basicSearch.niche.trim()) {
       toast.error('Please enter a niche or topic to search');
       return;
@@ -239,19 +263,22 @@ export default function TrendingRemixPage() {
 
     setIsSearching(true);
     try {
+      console.log('🚀 Starting trending search...');
       const result = await fetchAndUpsertTrending({
         niche: searchState.basicSearch.niche,
         platforms: [searchState.basicSearch.platform as 'youtube' | 'tiktok' | 'instagram'],
         max: 50,
       });
       
+      console.log('✅ Search result:', result);
       toast.success(`Found ${result.totalFound} trending videos, inserted ${result.totalInserted} new ones!`);
       
       // Reload trending videos after search with current filters
+      console.log('🔄 Reloading trending videos...');
       await loadTrendingVideos(true);
     } catch (error) {
-      console.error('Search error:', error);
-      toast.error('Failed to fetch trending content. Please try again.');
+      console.error('❌ Search error:', error);
+      toast.error(`Failed to fetch trending content: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSearching(false);
     }
@@ -448,11 +475,13 @@ export default function TrendingRemixPage() {
           </div>
           
           {/* Advanced Filters Panel */}
-          <AdvancedFiltersPanel
-            filters={searchState.advancedFilters}
-            onFiltersChange={updateAdvancedFilters}
-            onClearFilters={clearAllFilters}
-          />
+          {showAdvancedSearch && (
+            <AdvancedFiltersPanel
+              filters={searchState.advancedFilters}
+              onFiltersChange={updateAdvancedFilters}
+              onClearFilters={clearAllFilters}
+            />
+          )}
           
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2">
