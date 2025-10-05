@@ -224,6 +224,10 @@ const AdvancedSearchSchema = z.object({
       minComments: z.number().nullable(),
       minShares: z.number().nullable(),
     }).optional(),
+    languageFilters: z.object({
+      videoLanguages: z.array(z.string()).optional(),
+      audioLanguages: z.array(z.string()).optional(),
+    }).optional(),
   }).optional(),
   sortBy: z.object({
     key: z.enum(['viralityScore', 'viewsCount', 'likesCount', 'commentsCount', 'sharesCount', 'publishedAt', 'durationSeconds']),
@@ -291,6 +295,21 @@ export async function getTrendingVideosAdvanced(input: unknown) {
   }
   if (filters?.engagementFilters?.minShares !== null && filters?.engagementFilters?.minShares !== undefined) {
     whereConditions.push(gte(trendingVideos.sharesCount, filters.engagementFilters.minShares));
+  }
+  
+  // Language filters (filter by language codes in raw metadata)
+  if (filters?.languageFilters?.videoLanguages && filters.languageFilters.videoLanguages.length > 0) {
+    const languageConditions = filters.languageFilters.videoLanguages.map(lang => 
+      sql`${trendingVideos.raw}->>'defaultLanguage' = ${lang}`
+    );
+    whereConditions.push(or(...languageConditions));
+  }
+  
+  if (filters?.languageFilters?.audioLanguages && filters.languageFilters.audioLanguages.length > 0) {
+    const audioLanguageConditions = filters.languageFilters.audioLanguages.map(lang => 
+      sql`${trendingVideos.raw}->>'defaultAudioLanguage' = ${lang}`
+    );
+    whereConditions.push(or(...audioLanguageConditions));
   }
   
   // Advanced search filters
@@ -445,6 +464,7 @@ export async function getSearchPresets() {
         viewCountRange: { min: 100000, max: null },
         durationRange: { min: 15, max: 90 },
         engagementFilters: { minLikes: 1000, minComments: null, minShares: null },
+        languageFilters: { videoLanguages: ['en'], audioLanguages: ['en'] },
         platformSpecific: {
           youtube: { duration: 'short' },
           tiktok: { music: null, hashtags: [] },
@@ -464,6 +484,7 @@ export async function getSearchPresets() {
         viewCountRange: { min: 50000, max: null },
         durationRange: { min: 30, max: 120 },
         engagementFilters: { minLikes: 500, minComments: null, minShares: null },
+        languageFilters: { videoLanguages: ['en'], audioLanguages: ['en'] },
         platformSpecific: {
           youtube: { duration: 'short' },
           tiktok: { music: true, hashtags: ['fitness', 'workout'] },
@@ -483,6 +504,7 @@ export async function getSearchPresets() {
         viewCountRange: { min: 25000, max: null },
         durationRange: { min: 20, max: 180 },
         engagementFilters: { minLikes: 200, minComments: null, minShares: null },
+        languageFilters: { videoLanguages: ['en'], audioLanguages: ['en'] },
         platformSpecific: {
           youtube: { duration: 'short' },
           tiktok: { music: null, hashtags: [] },

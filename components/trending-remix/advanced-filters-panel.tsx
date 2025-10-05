@@ -67,6 +67,15 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
     });
   };
 
+  const updateLanguageFilters = (field: 'videoLanguages' | 'audioLanguages', languages: string[]) => {
+    updateFilters({
+      languageFilters: {
+        ...filters.languageFilters,
+        [field]: languages,
+      },
+    });
+  };
+
   const updatePlatformSpecific = (platform: 'youtube' | 'tiktok' | 'instagram', field: string, value: any) => {
     updateFilters({
       platformSpecific: {
@@ -90,6 +99,8 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
       filters.engagementFilters.minLikes !== null ||
       filters.engagementFilters.minComments !== null ||
       filters.engagementFilters.minShares !== null ||
+      filters.languageFilters.videoLanguages.length > 0 ||
+      filters.languageFilters.audioLanguages.length > 0 ||
       filters.platformSpecific.youtube.duration !== 'all' ||
       filters.platformSpecific.tiktok.music !== null ||
       filters.platformSpecific.instagram.reels !== null
@@ -266,6 +277,92 @@ export function AdvancedFiltersPanel({ filters, onFiltersChange, onClearFilters 
                     value={filters.engagementFilters.minShares || ''}
                     onChange={(e) => updateEngagementFilters('minShares', e.target.value)}
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* Language Filters */}
+            <div className="space-y-2">
+              <Label>Video Language</Label>
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <Label className="text-sm">Video Language (Captions)</Label>
+                  <Select
+                    value={filters.languageFilters.videoLanguages[0] || ''}
+                    onValueChange={(value) => {
+                      if (value) {
+                        updateLanguageFilters('videoLanguages', [value]);
+                      } else {
+                        updateLanguageFilters('videoLanguages', []);
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select video language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Any language</SelectItem>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="es">Spanish</SelectItem>
+                      <SelectItem value="fr">French</SelectItem>
+                      <SelectItem value="de">German</SelectItem>
+                      <SelectItem value="it">Italian</SelectItem>
+                      <SelectItem value="pt">Portuguese</SelectItem>
+                      <SelectItem value="ru">Russian</SelectItem>
+                      <SelectItem value="ja">Japanese</SelectItem>
+                      <SelectItem value="ko">Korean</SelectItem>
+                      <SelectItem value="zh">Chinese</SelectItem>
+                      <SelectItem value="ar">Arabic</SelectItem>
+                      <SelectItem value="hi">Hindi</SelectItem>
+                      <SelectItem value="nl">Dutch</SelectItem>
+                      <SelectItem value="sv">Swedish</SelectItem>
+                      <SelectItem value="no">Norwegian</SelectItem>
+                      <SelectItem value="da">Danish</SelectItem>
+                      <SelectItem value="fi">Finnish</SelectItem>
+                      <SelectItem value="pl">Polish</SelectItem>
+                      <SelectItem value="tr">Turkish</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label className="text-sm">Audio Language</Label>
+                  <Select
+                    value={filters.languageFilters.audioLanguages[0] || ''}
+                    onValueChange={(value) => {
+                      if (value) {
+                        updateLanguageFilters('audioLanguages', [value]);
+                      } else {
+                        updateLanguageFilters('audioLanguages', []);
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select audio language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Any language</SelectItem>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="es">Spanish</SelectItem>
+                      <SelectItem value="fr">French</SelectItem>
+                      <SelectItem value="de">German</SelectItem>
+                      <SelectItem value="it">Italian</SelectItem>
+                      <SelectItem value="pt">Portuguese</SelectItem>
+                      <SelectItem value="ru">Russian</SelectItem>
+                      <SelectItem value="ja">Japanese</SelectItem>
+                      <SelectItem value="ko">Korean</SelectItem>
+                      <SelectItem value="zh">Chinese</SelectItem>
+                      <SelectItem value="ar">Arabic</SelectItem>
+                      <SelectItem value="hi">Hindi</SelectItem>
+                      <SelectItem value="nl">Dutch</SelectItem>
+                      <SelectItem value="sv">Swedish</SelectItem>
+                      <SelectItem value="no">Norwegian</SelectItem>
+                      <SelectItem value="da">Danish</SelectItem>
+                      <SelectItem value="fi">Finnish</SelectItem>
+                      <SelectItem value="pl">Polish</SelectItem>
+                      <SelectItem value="tr">Turkish</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>

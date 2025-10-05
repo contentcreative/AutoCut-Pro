@@ -18,6 +18,10 @@ export interface AdvancedFilters {
     minComments: number | null;
     minShares: number | null;
   };
+  languageFilters: {
+    videoLanguages: string[];
+    audioLanguages: string[];
+  };
   platformSpecific: {
     youtube: {
       duration: 'short' | 'medium' | 'long' | 'all';

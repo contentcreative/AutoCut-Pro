@@ -88,6 +88,7 @@ export default function TrendingRemixPage() {
       viewCountRange: { min: null, max: null },
       durationRange: { min: null, max: null },
       engagementFilters: { minLikes: null, minComments: null, minShares: null },
+      languageFilters: { videoLanguages: [], audioLanguages: [] },
       platformSpecific: {
         youtube: { duration: 'all' },
         tiktok: { music: null, hashtags: [] },
@@ -220,6 +221,7 @@ export default function TrendingRemixPage() {
         viewCountRange: { min: null, max: null },
         durationRange: { min: null, max: null },
         engagementFilters: { minLikes: null, minComments: null, minShares: null },
+        languageFilters: { videoLanguages: [], audioLanguages: [] },
         platformSpecific: {
           youtube: { duration: 'all' },
           tiktok: { music: null, hashtags: [] },
