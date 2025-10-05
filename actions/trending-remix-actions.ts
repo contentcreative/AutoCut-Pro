@@ -201,6 +201,26 @@ export async function createRemixJob(input: unknown) {
   return { jobId: job.id };
 }
 
+export async function getTrendingVideos(niche?: string) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  if (niche) {
+    return await db
+      .select()
+      .from(trendingVideos)
+      .where(eq(trendingVideos.niche, niche))
+      .orderBy(desc(trendingVideos.viralityScore))
+      .limit(100);
+  }
+  
+  return await db
+    .select()
+    .from(trendingVideos)
+    .orderBy(desc(trendingVideos.viralityScore))
+    .limit(100);
+}
+
 export async function getUserRemixJobs() {
   const { userId } = auth();
   if (!userId) throw new Error('Unauthorized');

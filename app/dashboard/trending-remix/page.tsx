@@ -23,9 +23,35 @@ import {
   Download, 
   Info 
 } from "lucide-react";
-import { fetchAndUpsertTrending, createRemixJob } from "@/actions/trending-remix-actions";
+import { fetchAndUpsertTrending, createRemixJob, getTrendingVideos, getUserRemixJobs } from "@/actions/trending-remix-actions";
 import { toast } from "sonner";
 import Image from "next/image";
+
+// Helper functions
+function formatNumber(num: number): string {
+  if (num >= 1000000) {
+    return `${(num / 1000000).toFixed(1)}M`;
+  } else if (num >= 1000) {
+    return `${(num / 1000).toFixed(1)}K`;
+  }
+  return num.toString();
+}
+
+function formatAge(publishedAt: string | Date | null): string {
+  if (!publishedAt) return 'Unknown';
+  
+  const now = new Date();
+  const published = new Date(publishedAt);
+  const diffHours = Math.floor((now.getTime() - published.getTime()) / (1000 * 60 * 60));
+  
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  } else if (diffHours < 168) {
+    return `${Math.floor(diffHours / 24)}d ago`;
+  } else {
+    return `${Math.floor(diffHours / 168)}w ago`;
+  }
+}
 
 export default function TrendingRemixPage() {
   const [isSearching, setIsSearching] = useState(false);
@@ -45,25 +71,51 @@ export default function TrendingRemixPage() {
   useEffect(() => {
     loadTrendingVideos();
     loadRemixJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadTrendingVideos = async () => {
     try {
-      // TODO: Implement getTrendingVideos server action
-      // For now, we'll show a message that search is needed
-      console.log('Loading trending videos...');
+      const videos = await getTrendingVideos(searchForm.niche || undefined);
+      
+      // Format the data for the UI
+      const formattedVideos = videos.map((video: any) => ({
+        id: video.id,
+        title: video.title,
+        platform: video.platform === 'youtube' ? 'YouTube' : video.platform === 'tiktok' ? 'TikTok' : 'Instagram',
+        thumbnail: video.thumbnailUrl || 'https://via.placeholder.com/320x180',
+        creator: video.creatorHandle || 'Unknown',
+        views: formatNumber(video.viewsCount),
+        likes: formatNumber(video.likesCount),
+        age: formatAge(video.publishedAt),
+        viralityScore: Number(video.viralityScore).toFixed(2),
+      }));
+      
+      setTrendingVideos(formattedVideos);
     } catch (error) {
       console.error('Error loading trending videos:', error);
+      toast.error('Failed to load trending videos');
     }
   };
 
   const loadRemixJobs = async () => {
     try {
-      // TODO: Implement getUserRemixJobs server action
-      // For now, we'll show empty state
-      console.log('Loading remix jobs...');
+      const jobs = await getUserRemixJobs();
+      
+      // Format the data for the UI
+      const formattedJobs = jobs.map((job: any) => ({
+        id: job.id,
+        trendingVideoTitle: job.niche || 'Unknown Video',
+        status: job.status,
+        step: job.step || 'queued',
+        createdAt: new Date(job.createdAt).toLocaleDateString(),
+        outputUrl: job.outputVideoUrl || null,
+      }));
+      
+      setRemixJobs(formattedJobs);
     } catch (error) {
       console.error('Error loading remix jobs:', error);
+      toast.error('Failed to load remix jobs');
     }
   };
 
@@ -212,10 +264,10 @@ export default function TrendingRemixPage() {
                   <div>
                     <h4 className="font-medium text-blue-900 mb-1">Try searching for:</h4>
                     <ul className="text-sm text-blue-700 space-y-1">
-                      <li>• "AI tools"</li>
-                      <li>• "Productivity tips"</li>
-                      <li>• "Fitness routines"</li>
-                      <li>• "Cooking hacks"</li>
+                      <li>• &ldquo;AI tools&rdquo;</li>
+                      <li>• &ldquo;Productivity tips&rdquo;</li>
+                      <li>• &ldquo;Fitness routines&rdquo;</li>
+                      <li>• &ldquo;Cooking hacks&rdquo;</li>
                     </ul>
                   </div>
                 </div>

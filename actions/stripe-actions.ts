@@ -1,4 +1,4 @@
-import { updateProfile, updateProfileByStripeCustomerId } from "@/db/queries/profiles-queries";
+﻿import { updateProfile, updateProfileByStripeCustomerId } from "@/db/queries/profiles-queries";
 import { SelectProfile } from "@/db/schema";
 import { stripe } from "@/lib/stripe";
 import Stripe from "stripe";
@@ -61,12 +61,12 @@ export const manageSubscriptionStatusChange = async (subscriptionId: string, cus
     const subscription = await getSubscription(subscriptionId);
 
     const product = await stripe.products.retrieve(productId);
-    const membership = product.metadata.membership as MembershipStatus;
-    if (!["free", "pro"].includes(membership)) {
+    const membership = product.metadata.membership as string;
+    if (!membership || !["free", "pro"].includes(membership)) {
       throw new Error(`Invalid membership type in product metadata: ${membership}`);
     }
 
-    const membershipStatus = getMembershipStatus(subscription.status, membership);
+    const membershipStatus = getMembershipStatus(subscription.status, membership as MembershipStatus);
 
     await updateProfileByStripeCustomerId(customerId, {
       stripeSubscriptionId: subscription.id,
