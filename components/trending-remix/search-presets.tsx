@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Bookmark, Star, Plus, X, ChevronDown } from "lucide-react";
+import { Bookmark, Star, Plus, X } from "lucide-react";
 import { SearchPreset } from "@/types/trending-remix";
 import { getSearchPresets, saveSearchPreset } from "@/actions/trending-remix-actions";
 import { toast } from "sonner";
@@ -24,26 +24,10 @@ export function SearchPresets({ onPresetSelect, onSaveCurrentAsPreset, className
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [presetName, setPresetName] = useState('');
-  const [showDropdown, setShowDropdown] = useState(false);
 
   useEffect(() => {
     loadPresets();
   }, []);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('[data-preset-dropdown]')) {
-        setShowDropdown(false);
-      }
-    };
-
-    if (showDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showDropdown]);
 
   const loadPresets = async () => {
     try {
@@ -112,68 +96,40 @@ export function SearchPresets({ onPresetSelect, onSaveCurrentAsPreset, className
         </Button>
       </div>
       
-      {/* Active preset display */}
-      {selectedPreset && (
-        <div className="relative">
-          {(() => {
-            const activePreset = presets.find(p => p.id === selectedPreset);
-            if (!activePreset) return null;
-            
-            return (
-              <div className="relative" data-preset-dropdown>
-                <Button
-                  variant={activePreset.isDefault ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setShowDropdown(!showDropdown)}
-                  className="w-full justify-between h-9"
-                >
-                  <div className="flex items-center gap-2">
-                    {activePreset.isDefault && <Star className="h-3 w-3 text-yellow-500" />}
-                    <span className="font-medium">{activePreset.name}</span>
-                    <Badge variant="secondary" className="text-xs">
-                      {activePreset.platforms.length} platform{activePreset.platforms.length !== 1 ? 's' : ''}
-                    </Badge>
-                  </div>
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-                
-                {showDropdown && (
-                  <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-background border border-border rounded-md shadow-lg">
-                    <div className="p-2">
-                      <div className="text-sm text-muted-foreground mb-2">Actions:</div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setShowDropdown(false);
-                          handleRemovePreset(activePreset.id);
-                        }}
-                        className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <X className="h-3 w-3 mr-2" />
-                        Remove preset
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      )}
-      
-      {/* Preset buttons */}
+      {/* Preset buttons with X for removal */}
       <div className="flex flex-wrap gap-2">
         {presets.slice(0, 4).map((preset) => (
-          <Button
-            key={preset.id}
-            variant={selectedPreset === preset.id ? "default" : "outline"}
-            size="sm"
-            onClick={() => handlePresetSelect(preset.id)}
-            className="h-8 text-xs"
-          >
-            {preset.name}
-          </Button>
+          <div key={preset.id} className="relative group">
+            <Button
+              variant={selectedPreset === preset.id ? "default" : "outline"}
+              size="sm"
+              onClick={() => handlePresetSelect(preset.id)}
+              className="h-8 text-xs pr-8"
+            >
+              <div className="flex items-center gap-2">
+                {preset.isDefault && <Star className="h-3 w-3 text-yellow-500" />}
+                <span>{preset.name}</span>
+                <Badge variant="secondary" className="text-xs">
+                  {preset.platforms.length} platform{preset.platforms.length !== 1 ? 's' : ''}
+                </Badge>
+              </div>
+            </Button>
+            
+            {/* X button for removal - only show for non-default presets */}
+            {!preset.isDefault && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRemovePreset(preset.id);
+                }}
+                className="absolute right-1 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         ))}
       </div>
 
