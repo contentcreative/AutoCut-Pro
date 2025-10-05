@@ -255,22 +255,36 @@ export default function TrendingRemixPage() {
   const handleSearchTrends = async () => {
     console.log('🔍 Search Trends button clicked');
     console.log('📝 Current niche:', searchState.basicSearch.niche);
+    console.log('📝 Current platform:', searchState.basicSearch.platform);
+    console.log('📝 isSearching state:', isSearching);
+    
+    // Simple test to ensure function is being called
+    alert('Search Trends button clicked! Check console for details.');
     
     if (!searchState.basicSearch.niche.trim()) {
+      console.log('❌ No niche provided');
       toast.error('Please enter a niche or topic to search');
       return;
     }
 
+    console.log('✅ Niche provided, starting search...');
     setIsSearching(true);
+    
     try {
       console.log('🚀 Starting trending search...');
+      console.log('📤 Calling fetchAndUpsertTrending with:', {
+        niche: searchState.basicSearch.niche,
+        platforms: [searchState.basicSearch.platform],
+        max: 50,
+      });
+      
       const result = await fetchAndUpsertTrending({
         niche: searchState.basicSearch.niche,
         platforms: [searchState.basicSearch.platform as 'youtube' | 'tiktok' | 'instagram'],
         max: 50,
       });
       
-      console.log('✅ Search result:', result);
+      console.log('✅ Search result received:', result);
       toast.success(`Found ${result.totalFound} trending videos, inserted ${result.totalInserted} new ones!`);
       
       // Reload trending videos after search with current filters
@@ -278,8 +292,13 @@ export default function TrendingRemixPage() {
       await loadTrendingVideos(true);
     } catch (error) {
       console.error('❌ Search error:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       toast.error(`Failed to fetch trending content: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
+      console.log('🏁 Search completed, setting isSearching to false');
       setIsSearching(false);
     }
   };
