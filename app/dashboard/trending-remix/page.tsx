@@ -42,7 +42,6 @@ import { ViralityScoreTooltip } from "@/components/trending-remix/virality-score
 import { AdvancedFiltersPanel } from "@/components/trending-remix/advanced-filters-panel";
 import { SearchSuggestions } from "@/components/trending-remix/search-suggestions";
 import { SortControls } from "@/components/trending-remix/sort-controls";
-import { SearchPresets } from "@/components/trending-remix/search-presets";
 import { PaginationControls } from "@/components/trending-remix/pagination-controls";
 
 // Helper functions
@@ -324,13 +323,6 @@ export default function TrendingRemixPage() {
     }
   }, [showSuggestions]);
 
-  const handlePresetSelect = (preset: any) => {
-    updateBasicSearch({ 
-      niche: preset.niche,
-      platform: preset.platforms[0] || 'youtube'
-    });
-    updateAdvancedFilters(preset.filters);
-  };
 
   const handleSortChange = async (sortBy: SortOption) => {
     updateSortBy(sortBy);
@@ -401,13 +393,6 @@ export default function TrendingRemixPage() {
         </div>
       </div>
 
-      {/* Search Presets */}
-      <div className="mb-6">
-        <SearchPresets 
-          onPresetSelect={handlePresetSelect}
-          currentSearchState={searchState}
-        />
-      </div>
 
       {/* Enhanced Trend Discovery */}
       <Card className="mb-8">
