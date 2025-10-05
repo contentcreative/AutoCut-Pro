@@ -26,9 +26,11 @@ export function ViralityScoreTooltip({ score, breakdown, className }: ViralitySc
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge variant="secondary" className={`flex items-center gap-1 cursor-help ${className}`}>
-            {safeScore.toFixed(2)} <Info className="h-3 w-3" />
-          </Badge>
+          <div className="inline-block">
+            <Badge variant="secondary" className={`flex items-center gap-1 cursor-help ${className}`}>
+              {safeScore.toFixed(2)} <Info className="h-3 w-3" />
+            </Badge>
+          </div>
         </TooltipTrigger>
         <TooltipContent className="w-80 p-4">
           <div className="space-y-3">
