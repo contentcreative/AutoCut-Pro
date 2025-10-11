@@ -453,22 +453,19 @@ export default function TrendingRemixPage() {
             </div>
             <div className="space-y-2">
               <label htmlFor="platform" className="text-sm font-medium">Platform</label>
-              {/* Debug: Current platform value */}
-              <div className="text-xs text-gray-500">Debug: {searchState.basicSearch.platform}</div>
-              {/* Temporary HTML select for debugging */}
-              <select 
-                id="platform"
+              <Select 
                 value={searchState.basicSearch.platform} 
-                onChange={(e) => {
-                  console.log('Platform changed to:', e.target.value);
-                  updateBasicSearch({ platform: e.target.value });
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onValueChange={(value) => updateBasicSearch({ platform: value })}
               >
-                <option value="youtube">YouTube Shorts</option>
-                <option value="tiktok">TikTok</option>
-                <option value="instagram">Instagram Reels</option>
-              </select>
+                <SelectTrigger id="platform" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="youtube">YouTube Shorts</SelectItem>
+                  <SelectItem value="tiktok">TikTok</SelectItem>
+                  <SelectItem value="instagram">Instagram Reels</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           

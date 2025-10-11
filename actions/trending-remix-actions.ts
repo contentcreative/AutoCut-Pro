@@ -7,8 +7,8 @@ import { eq, and, desc, asc, gte, lte, like, or, count, sql, inArray } from 'dri
 import { z } from 'zod';
 import { fetchYouTubeShortsTrending } from '@/lib/integrations/youtube';
 import { AdvancedFilters, SortOption, SearchPreset, TrendingVideo } from '@/types/trending-remix';
-// TODO: Implement when billing is ready
-// import { validateWhopEntitlement } from '@/lib/payments/whop';
+import { computeViralityScore } from '@/lib/virality';
+import { validateWhopEntitlement } from '@/lib/billing'; // Updated to use billing.ts
 
 const FetchSchema = z.object({
   niche: z.string().min(2),
@@ -562,20 +562,4 @@ export async function saveSearchPreset(preset: Omit<SearchPreset, 'id' | 'create
 }
 
 // Helper function for virality score calculation
-function computeViralityScore(v: {
-  views: number; likes: number; comments: number; shares: number;
-  ageHours: number; durationSec?: number;
-}) {
-  // Normalize per-hour engagement to favor recency
-  const perHour = (x: number) => x / Math.max(v.ageHours, 1);
-  const w = { views: 0.35, likes: 0.25, comments: 0.2, shares: 0.2 };
-  const raw =
-    w.views * Math.log10(1 + perHour(v.views)) +
-    w.likes * Math.log10(1 + perHour(v.likes)) +
-    w.comments * Math.log10(1 + perHour(v.comments)) +
-    w.shares * Math.log10(1 + perHour(v.shares));
-  // Optional duration penalty for very long videos in shorts context
-  const durPenalty = v.durationSec && v.durationSec > 75 ? 0.9 : 1;
-  const score = +(Math.min(raw * durPenalty, 5)).toFixed(4); // cap 0-5
-  return { score, breakdown: { ...w, ageHours: v.ageHours, durationSec: v.durationSec } };
-}
+// computeViralityScore is now imported from @/lib/virality

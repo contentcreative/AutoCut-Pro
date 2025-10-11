@@ -6,7 +6,7 @@ import { aiVideoProjects, aiGenerationJobs, aiAssets } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 // TODO: Implement when billing is ready
-// import { verifyActiveSubscription } from '@/lib/billing';
+import { verifyActiveSubscription } from '@/lib/billing';
 // import { csFetch } from '@/lib/cs-fetch';
 
 const CreateProjectSchema = z.object({
@@ -27,7 +27,7 @@ export async function createAIVideoProject(input: z.infer<typeof CreateProjectSc
   if (!userId) throw new Error('Unauthorized');
   
   // TODO: Implement subscription check when billing is ready
-  // await verifyActiveSubscription(userId);
+  await verifyActiveSubscription(userId);
 
   const data = CreateProjectSchema.parse(input);
   
